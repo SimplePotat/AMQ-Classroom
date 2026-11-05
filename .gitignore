@@ -116,6 +116,13 @@ GitHub.sublime-settings
 .history
 static
 !quiz/static
+!classroom/static
 
 docker-compose.local.yml
+
+# Classroom runtime (profiles, passcodes, host key, local media)
+/data/
+/test-results/
+/playwright-report/
+/node_modules/
 

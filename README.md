@@ -1,52 +1,167 @@
-## Anime Themes Quiz
+# Anime Quiz · Classroom
 
-**Official instance: [quiz.moe](https://quiz.moe)**
+An AMQ-inspired, local-network edition of [przemub/anime_quiz](https://github.com/przemub/anime_quiz). One classroom screen plays the music and reveals the video. Everyone else joins on a phone or laptop, guesses the anime, and gets scored automatically.
 
-Have you ever had an anime quiz with your friends,
-used a YouTube video for that and thought:
+**Host:** `http://localhost:8009/host` · **Players:** `http://YOUR-LAN-IP:8009`
 
-> Man, this guy has a shit taste!
+![The classroom host lobby](docs/host-lobby.png)
 
-Look no further!
+## Start a classroom
 
-Anime Quiz pulls the anime you and your friends watched from
-your [MyAnimeList](https://myanimelist.net) profiles and randomly
-generates a quiz --- it first chooses one of the participants,
-then pulls their MAL list, gets links to themes hosted at
-[animethemes.moe](https://animethemes.moe), plays it and gives you
-10 seconds (configurable) to guess! Then the whole video is 
-uncovered for you to enjoy and the person who guessed can
-shout at the gamemaster to add their points to the built-in
-scoreboard.
+Install **Python 3.12 or newer**, clone this fork, and run:
 
-### Features
-
-* MAL lists pulled and cached for 7 days at the server
-* animethemes.moe queried and cached for 30 days
-* choice of MAL lists
-* choice of theme types (OP/ED)
-* choice of time to guess
-* all hosted online
-
-### Run
-
-If you just want to play, go to [quiz.moe](https://quiz.moe).
-
-If you want to develop or self-host, the recommended way is to
-install [Docker](https://docker.com) with Docker Compose and run:
-```shell
-docker network create server
-docker-compose up -d
-docker-compose exec anime_quiz python manage.py collectstatic
+```sh
+git clone https://github.com/SimplePotat/anime-quiz-classroom.git
+cd anime-quiz-classroom
+./start-classroom.sh
 ```
 
-That's it. Anime Quiz will be run at http://localhost:8009.
-To rebuild, run `docker-compose build` beforehand.
+On Windows, run **`start-classroom.cmd`** instead. The launcher creates a virtual environment and installs the four classroom dependencies on its first run. No Node, Redis, cloud account, or MAL API key is needed to run the app.
 
-If you want to expose it to the Internet, set `ANIME_QUIZ_HOST_IP`
-to the host IP you want (`0.0.0.0` for access on all networks)
-or, even better, put it behind a reverse proxy.
+Or set it up manually:
 
-### Develop
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-classroom.txt
+.venv/bin/python run_classroom.py
+```
 
-PRs are welcome! The code is licensed under GNU Affero Public Licence 3.
+Keep the terminal open. It prints the **player URL** and a private **host key**. The key persists across restarts. Open `/host`, enter that key, and connect the computer to the classroom display and speakers.
+
+1. Everyone connects to the same LAN/Wi-Fi and opens the printed player URL or scans the QR code.
+2. Players create a name and a passcode. They can save a MAL username and an avatar, then mark themselves ready.
+3. The host chooses **Quiz settings → song source**, prepares the quiz, and presses **Start quiz**.
+4. Music plays only on the host screen. If the browser requests permission, click **Enable / resume audio**. The timer starts after playback begins.
+5. Players submit an anime title. They can revise it until the server closes the round. One correct answer earns one point, regardless of speed.
+6. The video and answer appear, scores update, and the host can review answers before continuing. **Whiteboard** opens a larger, fullscreen-friendly display.
+
+Use **Results CSV** at the end to save standings and round-by-round answers. **Play again** keeps the group and their profiles.
+
+### Network address
+
+The server binds to `0.0.0.0:8009`. Its IP detection chooses the active interface. Override it if you have a VPN or multiple network adapters:
+
+```sh
+./start-classroom.sh --port 8009 --advertise http://192.168.1.50:8009
+```
+
+Replace that example with the host computer's actual LAN address. Allow inbound TCP on the chosen port in the host firewall. School guest networks sometimes block device-to-device traffic; use a network that allows clients to reach the host. No router port forwarding is required. `localhost` works only on the host computer.
+
+## Included functionality
+
+| Area | Classroom edition |
+| --- | --- |
+| Profiles | Persistent player names, hashed passcodes, MAL usernames, and eight avatar styles; returning sign-in on another device |
+| Multiplayer | Shared room, ready status, presence, late-join spectators, reconnects, up to 100 roster entries |
+| Song pools | Starter collection, union of participating players' public MAL lists, or a local media catalog |
+| Settings | 1–100 songs, OP/ED selection, MAL statuses, 5–90 second guesses, 5–60 second reveals, random clip starts, optional automatic advance |
+| Guessing | Title autocomplete, alternative English/romaji/Japanese names where available, case/accent/punctuation normalization, revisions until the deadline |
+| Scoring | Server-controlled deadlines, one point per correct anime, tied ranks, private guesses before reveal, host corrections, no-score skips |
+| Host display | Audio-only guessing, video reveal, live leaderboard, QR join link, volume, pause/resume, whiteboard mode |
+| Recovery | Saved submitted answers on refresh; interrupted games pause on server restart; unfinished preparation can be retried |
+| Results | Persistent current game and completed-game records; CSV export of the current game |
+
+This implements the core AMQ-style quiz loop for a classroom. It does not recreate AMQ's account service, ranked matchmaking, chat, avatar economy, dungeon modes, or insert-song catalog. It is an independent project, not affiliated with Anime Music Quiz.
+
+## Song sources
+
+### Starter collection
+
+The included catalog contains verified AnimeThemes metadata for 12 familiar series. It includes openings and endings, alternative titles, and stream URLs. **It does not bundle copyrighted music or video.** The host needs internet to stream those videos; player devices only talk to the local server. The catalog excludes entries flagged explicit, and excludes spoiler-tagged entries unless the host enables them.
+
+To refresh the starter metadata:
+
+```sh
+.venv/bin/python scripts/build_starter.py
+```
+
+### Group MAL lists
+
+Players save their **username**, never their MAL password. Choose **Group's MAL lists** in quiz settings. Lists must be public. Watching and Completed are selected by default; On hold, Dropped, and Plan to watch are optional.
+
+The server combines the selected lists, samples up to 80 anime in randomized order, and looks up their themes on AnimeThemes. It stops when there are enough candidates for the requested quiz. MAL responses are cached for seven days and AnimeThemes metadata for 30 days. The selection is a union of the group's lists, not a guarantee of equal representation per player. Every selected theme is unique within a quiz.
+
+A missing/private list or unavailable provider produces a visible error instead of silently switching to another person's list. Some anime have no suitable video; if fewer songs match than requested, the host sees the actual round count before starting. Internet filters or provider rate limits can prevent online loading.
+
+### Fully local / offline music
+
+Use media you are allowed to play. Add files to **`data/media/`** and create **`data/catalog.json`**, following [examples/catalog.json](examples/catalog.json):
+
+```json
+[
+  {
+    "anime": "Cowboy Bebop",
+    "aliases": ["Bebop"],
+    "song": "Tank!",
+    "artist": "Seatbelts",
+    "type": "OP",
+    "year": 1998,
+    "media": "cowboy-bebop-opening.webm"
+  }
+]
+```
+
+The example refers to a file you supply; none is included. The `media` path is relative to `data/media/`. Supported extensions are `.webm`, `.mp4`, `.mp3`, `.wav`, `.ogg`, and `.m4a`; the browser must support the file's codec. H.264/AAC MP4 is a practical choice for cross-browser video compatibility. Local playback supports byte ranges for seeking. Audio-only files work too, with song details shown at reveal.
+
+Choose **Local catalog** in quiz settings. After installing dependencies, local mode needs no internet. Browser scripts, styling, artwork, icons, and QR generation are all served locally.
+
+## Docker
+
+```sh
+CLASSROOM_JOIN_URL=http://192.168.1.50:8009 \
+  docker compose -f compose.classroom.yml up --build -d
+docker compose -f compose.classroom.yml logs classroom
+```
+
+Set `CLASSROOM_JOIN_URL` to the host computer's LAN address so QR codes do not point at Docker's internal network or localhost. The named volume `classroom_data` preserves profiles, the host key, cache, results, and local media. The container runs as a non-root user. The Docker path is provided separately from the upstream deployment.
+
+## Data and operation
+
+Runtime data lives in **`data/`**, which is excluded from Git and source archives:
+
+- `classroom.sqlite3`: profiles, Django sessions, current game, completed results, and API cache.
+- `.host-key`: the host credential, also printed at startup.
+- `.django-key`: persistent session signing secret.
+- `catalog.json` and `media/`: your optional local collection.
+
+Back up this directory with the server stopped. To move the classroom to another computer, copy it alongside the source. Do not share this directory with players. The UI exposes a Source link to this AGPL-licensed fork.
+
+| Environment variable | Purpose |
+| --- | --- |
+| `CLASSROOM_DATA_DIR` | Store runtime data somewhere other than `./data` |
+| `CLASSROOM_HOST_KEY` | Supply your own host credential instead of the generated key |
+| `CLASSROOM_SECRET_KEY` | Override the generated Django secret |
+| `CLASSROOM_ALLOWED_HOSTS` | Optional comma-separated HTTP host allowlist; LAN IP access is accepted by default |
+| `CLASSROOM_SOURCE_URL` | Link to your own modified source when distributing another variant |
+
+Run **one server process per data directory**. The threaded Waitress server serializes room transitions and persists them atomically in SQLite. The browser polls once a second; countdowns interpolate from server time. This is designed for a trusted classroom LAN over HTTP, not as a public internet service. Host actions require a host session; player mutations require a signed-in profile, and all state-changing requests use Django CSRF protection.
+
+Only one host display should play audio. The host should keep its tab active. New players joining during a game spectate until the next game. There is no automatic account recovery; keep player passcodes somewhere the players can remember. Registered names and passcodes belong to this local server, not to MAL.
+
+The roster supports 100 entries. Automated verification covers six browser participants and concurrent state updates, not a 100-device classroom load test.
+
+## Development and verification
+
+Server tests need no external services or music downloads:
+
+```sh
+DJANGO_SETTINGS_MODULE=classroom.settings .venv/bin/python -m django test classroom
+```
+
+Optional browser tests require Node 24+:
+
+```sh
+npm ci
+npx playwright install chromium --only-shell
+npm run test:browser
+```
+
+Set `PYTHON` if the Python executable is not `.venv/bin/python` (or `.venv\Scripts\python.exe` on Windows). The browser suite starts an isolated server, generates synthetic test audio, registers six profiles, uses separate host/phone/desktop sessions, verifies audio, whiteboard mode, answer privacy, scoring, pause/resume, reconnects, CSV and reusable profiles, and writes screenshots into `test-results/`. If FFmpeg is installed, it also generates a video test pattern and verifies video decoding and reveal. CI includes FFmpeg. It removes its temporary database afterwards. No real music or user data is part of these tests.
+
+The included GitHub Actions workflow runs server checks on Python 3.12/3.13 and browser checks on Chromium. The upstream deployment workflows are restricted to the upstream repository so this fork does not attempt to publish to the original author's servers.
+
+## Upstream and license
+
+Forked from [przemub/anime_quiz](https://github.com/przemub/anime_quiz), based on commit `d087636`. The original Django app, templates, assets, and deployment files remain available; its instructions are preserved in [README.upstream.md](README.upstream.md). The classroom edition has independent Django settings and URLs and does not require changes to the original Redis-backed setup.
+
+**AGPL-3.0-or-later**, see [COPYING](COPYING). Original attribution is preserved. Classroom artwork and icons are original SVG assets. Song metadata and stream links come from [AnimeThemes](https://animethemes.moe); anime lists come from [MyAnimeList](https://myanimelist.net). Media remains hosted by its providers or supplied by the host.

@@ -1,0 +1,13 @@
+FROM python:3.13-slim
+WORKDIR /app
+COPY requirements-classroom.txt .
+RUN pip install --no-cache-dir -r requirements-classroom.txt \
+    && useradd --uid 10001 --create-home quiz \
+    && mkdir /data && chown quiz:quiz /data
+COPY classroom ./classroom
+COPY run_classroom.py COPYING ./
+ENV CLASSROOM_DATA_DIR=/data PYTHONUNBUFFERED=1
+USER quiz
+EXPOSE 8009
+VOLUME /data
+CMD ["python", "run_classroom.py"]

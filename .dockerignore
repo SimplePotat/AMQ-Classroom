@@ -1,7 +1,13 @@
+.git
+.venv
+data
+__pycache__
+*.pyc
+test-results
 venv
 .idea
 .github
-.git
 build
 dist
-static
+/static
+node_modules

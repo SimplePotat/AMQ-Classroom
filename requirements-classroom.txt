@@ -1,0 +1,4 @@
+Django>=5.2.18,<5.3
+waitress>=3.0.2,<4
+requests>=2.32.3,<3
+qrcode>=8.2,<9

@@ -1,0 +1,41 @@
+name: Classroom checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -r requirements-classroom.txt
+      - run: python -m django test classroom --verbosity 1
+        env:
+          DJANGO_SETTINGS_MODULE: classroom.settings
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pip install -r requirements-classroom.txt
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium --only-shell
+      - run: sudo apt-get install -y ffmpeg
+      - run: npm run test:browser
+        env:
+          PYTHON: python
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: classroom-previews
+          path: test-results/

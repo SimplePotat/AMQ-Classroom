@@ -1,0 +1,19 @@
+[
+  {
+    "anime": "My Example Anime",
+    "aliases": ["Example Anime", "My Example Anime English Title"],
+    "song": "Example Opening",
+    "artist": "Example Artist",
+    "type": "OP",
+    "year": 2024,
+    "media": "example-opening.webm"
+  },
+  {
+    "anime": "Another Example Anime",
+    "aliases": ["Another Example"],
+    "song": "Example Ending",
+    "artist": "Example Artist",
+    "type": "ED",
+    "media": "example-ending.mp3"
+  }
+]

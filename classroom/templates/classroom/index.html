@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <meta name="description" content="Your classroom's anime music quiz. Join, listen, guess, and climb the leaderboard.">
+  <title>Anime Quiz · Classroom</title>
+  <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand" aria-label="Anime Quiz home"><img src="/assets/mark.svg" alt=""><span>ANIME<span class="brand-light">QUIZ</span><small>CLASSROOM EDITION</small></span></a>
+    <nav aria-label="Main navigation"><a id="mode-link" href="/host">Host desk</a><button class="text-button" id="help-button">How to play</button><a id="source-link" href="https://github.com/SimplePotat/anime-quiz-classroom" target="_blank" rel="noopener">Source ↗</a></nav>
+    <div class="connection" id="connection"><i></i><span>Connecting</span></div>
+  </header>
+  <main id="app"><div class="initial-loading"><div class="loader"></div><p>Finding your classroom…</p></div></main>
+  <footer><span>Made for the music. Built for the room.</span><span>AnimeThemes × MyAnimeList <b>·</b> AGPL-3.0</span></footer>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="help-dialog"><div class="dialog-heading"><div><span class="eyebrow">THE RULES</span><h2>Listen. Recognize. Reveal.</h2></div><button class="icon-button" data-close aria-label="Close help">×</button></div><ol class="how-list"><li><b>Join the same network</b><p>Open the address on the board. Create a player name and passcode to reuse your profile next time.</p></li><li><b>Listen to the classroom speakers</b><p>The host plays the music. Enter the anime title on your own device; you can revise it until time runs out.</p></li><li><b>See the answer together</b><p>Each correct anime earns one point. English, romaji, and known alternative titles are accepted. The host can review an answer.</p></li><li><b>Make it your playlist</b><p>Add a public MAL username to your profile. The host can build a quiz from everyone's lists, the starter collection, or local files.</p></li></ol><p class="subtle">Arriving mid-game? You'll spectate until the next quiz. Your passcode belongs to this classroom server; it is not your MAL password.</p></dialog>
+  <dialog id="settings-dialog"></dialog>
+  <dialog id="profile-dialog"></dialog>
+  <dialog id="confirm-dialog"><div class="dialog-heading"><h2>Reset this room?</h2><button class="icon-button" data-close aria-label="Cancel">×</button></div><p>The current quiz and scores will be cleared. Saved player profiles will stay.</p><div class="dialog-actions"><button class="button secondary" data-close>Keep playing</button><button class="button danger" id="confirm-reset">Reset room</button></div></dialog>
+</body>
+</html>

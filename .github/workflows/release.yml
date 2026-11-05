@@ -7,6 +7,7 @@ on:
 jobs:
   test:
     name: Run tests
+    if: github.repository == 'przemub/anime_quiz'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -26,6 +27,7 @@ jobs:
           django-admin test -t "/usr/local/lib/python3.12/site-packages/quiz"
   release:
     name: Push to Docker Hub
+    if: github.repository == 'przemub/anime_quiz'
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -50,6 +52,7 @@ jobs:
         tags: przemub/anime_quiz:latest,przemub/anime_quiz:${{ steps.short_id.outputs.sha_short }}
   deploy:
     name: Deploy on the official instance
+    if: github.repository == 'przemub/anime_quiz'
     runs-on: ubuntu-latest
     needs: test
     steps:

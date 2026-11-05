@@ -1,0 +1,21 @@
+services:
+  classroom:
+    build:
+      context: .
+      dockerfile: Dockerfile.classroom
+    ports:
+      - "${CLASSROOM_BIND_IP:-0.0.0.0}:8009:8009"
+    volumes:
+      - classroom_data:/data
+    environment:
+      CLASSROOM_HOST_KEY: ${CLASSROOM_HOST_KEY:-}
+    command: ["python", "run_classroom.py", "--advertise", "${CLASSROOM_JOIN_URL:-http://localhost:8009}"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8009/', timeout=5)"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+
+volumes:
+  classroom_data:
