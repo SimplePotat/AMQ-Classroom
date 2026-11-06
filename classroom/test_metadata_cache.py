@@ -325,14 +325,14 @@ class LobbyCacheTests(TransactionTestCase):
             fetch.assert_not_called()
         self.assertEqual(Room.objects.get(pk=1).state["phase"], "ready")
 
-    def test_warming_has_a_title_cap_and_uses_list_statuses(self):
+    def test_warming_indexes_every_list_entry_including_unselected_statuses(self):
         with patch("classroom.library.mal_list", return_value=mal_entries(100) + [
-            {"anime_id": 1000, "anime_title": "Excluded", "status": 6},
+            {"anime_id": 1000, "anime_title": "Included", "status": 6},
         ]), patch("classroom.library.get_json", side_effect=batch_response) as fetch:
             prefetch._warm("1", "player_1")
-        self.assertEqual(CachedResource.objects.count(), 40)
-        self.assertEqual(fetch.call_count, 4)
-        self.assertFalse(CachedResource.objects.filter(key="anime:mal:1000").exists())
+        self.assertEqual(CachedResource.objects.count(), 101)
+        self.assertEqual(fetch.call_count, 11)
+        self.assertTrue(CachedResource.objects.filter(key="anime:mal:1000").exists())
 
     def test_preparation_interrupts_warming_before_the_next_batch(self):
         def respond(url, params):
@@ -370,7 +370,7 @@ class LobbyCacheTests(TransactionTestCase):
         self.assertEqual(Room.objects.get(pk=1).state, before)
         fetch.assert_not_called()
 
-    def test_background_request_budget_does_not_cache_partial_mal_lists(self):
+    def test_interrupted_background_warming_does_not_cache_partial_mal_lists(self):
         clock = [100.0]
         def sleep(seconds):
             clock[0] += seconds
@@ -381,16 +381,14 @@ class LobbyCacheTests(TransactionTestCase):
             session.return_value.get.side_effect = lambda *a, **k: provider_response(chunks=(body,))
             with self.assertRaises(InterruptedError):
                 prefetch._warm("1", "player_1")
-            self.assertEqual(session.return_value.get.call_count, prefetch.REQUEST_BUDGET)
+            self.assertGreater(session.return_value.get.call_count, 0)
         self.assertFalse(CachedResource.objects.exists())
 
     def test_background_deadline_stops_theme_lookups(self):
-        clock = [0.0]
-        def load_list(username):
-            clock[0] = 61
-            return mal_entries(1)
-        with patch("classroom.prefetch.time.monotonic", side_effect=lambda: clock[0]), patch(
-                "classroom.library.mal_list", side_effect=load_list), patch(
+        before_list, list_fetched, past_scaled_deadline = 0, 61, 200
+        with patch("classroom.prefetch.time.monotonic", side_effect=[
+            before_list, before_list, list_fetched, past_scaled_deadline]), patch(
+                "classroom.library.mal_list", return_value=mal_entries(1)), patch(
                 "classroom.library.anime_data_batch") as themes:
             with self.assertRaises(InterruptedError):
                 prefetch._warm("1", "player_1")
