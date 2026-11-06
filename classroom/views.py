@@ -122,7 +122,7 @@ def index(request):
 
 @require_GET
 def asset(request, filename):
-    if filename not in {"app.js", "style.css", "mark.svg", "scene.svg"}:
+    if filename not in {"app.js", "style.css", "mark.svg"}:
         return HttpResponse(status=404)
     return FileResponse((Path(__file__).parent / "static" / filename).open("rb"), content_type=mimetypes.guess_type(filename)[0])
 

@@ -359,7 +359,7 @@ footer b {
   border-radius:16px;
   overflow:hidden;
   aspect-ratio:16/8.6;
-  background:#132333 url('/assets/scene.svg') center/cover no-repeat;
+  background:radial-gradient(ellipse at 72% 15%,#203a4a 0,transparent 44%),linear-gradient(145deg,#172b3d,#101b28 80%);
   box-shadow:0 10px 35px #03081030
 }
 
@@ -1131,7 +1131,7 @@ footer b {
   position:relative;
   min-height:320px;
   border-radius:20px;
-  background:#1c3449 url('/assets/scene.svg') 58% center/cover;
+  background:radial-gradient(ellipse at 20% 18%,#294958 0,transparent 55%),linear-gradient(145deg,#1c3449,#142230);
   overflow:hidden;
   display:flex;
   flex-direction:column;
@@ -1139,17 +1139,6 @@ footer b {
   align-items:center;
   padding:35px;
   border:1px solid #385265
-}
-
-.auth-hero:before {
-  content:"";
-  position:absolute;
-  inset:0;
-  background:linear-gradient(180deg,#15263622,#0e1b2b55 40%,#101c2aed)
-}
-
-.auth-hero>* {
-  position:relative
 }
 
 .auth-hero h1 {
@@ -1889,8 +1878,7 @@ dialog::backdrop {
   .auth-hero {
     width:100%;
     min-height:250px;
-    padding:23px;
-    background-position:60% 40%
+    padding:23px
   }
   .auth-hero h1 {
     font-size:36px;
