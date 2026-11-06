@@ -12,7 +12,7 @@ import requests
 
 from .engine import GameError
 
-JSON_HOSTS = frozenset({"api.animethemes.moe", "myanimelist.net"})
+JSON_HOSTS = frozenset({"api.animethemes.moe", "myanimelist.net", "openings.moe"})
 MAX_JSON_BYTES = 4 * 1024 * 1024
 LOCAL = threading.local()
 RATE_LOCK = threading.Lock()

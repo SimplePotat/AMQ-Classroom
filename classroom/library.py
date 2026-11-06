@@ -11,9 +11,9 @@ from urllib.parse import quote, urlparse
 
 from django.conf import settings
 from django.db import close_old_connections
+from . import engine, metadata
 from .engine import GameError, room_state
 from .models import CachedResource
-from . import metadata
 from .metadata import get_json
 
 LOG = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ ANIME_PAGE_SIZE = 15
 MAX_ANIME_PAGES = 10
 ANIME_TTL = 30 * 86400
 MISSING_ANIME_TTL = 86400
+OPENINGS_TTL = 7 * 86400
 CACHE_LOCK = threading.RLock()
 INCLUDE = "animethemes.animethemeentries.videos,animethemes.song.artists,animesynonyms,resources"
 STARTER = [
@@ -183,6 +184,30 @@ def anime_data_batch(mal_ids):
     return found
 
 
+def openings_catalog():
+    def fetch():
+        payload = get_json("https://openings.moe/api/list.php")
+        if not isinstance(payload, list) or any(not isinstance(record, dict)
+                or not isinstance(record.get("uid"), str) or not isinstance(record.get("source"), str)
+                for record in payload):
+            raise GameError("The music provider returned invalid anime data.")
+        catalog = {}
+        for record in payload:
+            catalog.setdefault(engine.normalize(record["source"]), []).append(record)
+        return catalog
+    return cached("openings:catalog", OPENINGS_TTL, fetch)
+
+
+def openings_details(uid):
+    def fetch():
+        payload = get_json("https://openings.moe/api/details.php", {"uid": uid})
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict) or not isinstance(data.get("file"), str):
+            raise GameError("The music provider returned invalid anime data.")
+        return data
+    return cached(f"openings:uid:{uid}", OPENINGS_TTL, fetch)
+
+
 def songs_from_anime(anime, title, options):
     songs = []
     aliases = [title, *[a["text"] for a in anime.get("animesynonyms", []) if a.get("text")]]
@@ -202,6 +227,42 @@ def songs_from_anime(anime, title, options):
         songs.append({"id": f"at-{theme['id']}", "anime": anime["name"], "aliases": aliases,
             "song": song.get("title") or "Unknown title", "artist": ", ".join(a["name"] for a in song.get("artists", [])) or "Artist not listed",
             "type": theme["type"], "year": anime.get("year"), "media": video["link"]})
+    return songs
+
+
+def songs_from_openings(batch, options, limit):
+    songs = []
+    if limit <= 0:
+        return songs
+    catalog = openings_catalog()
+    for _, title in batch:
+        records = catalog.get(engine.normalize(title), [])
+        RANDOM.shuffle(records)
+        for record in records:
+            uid = record["uid"]
+            if not (uid.startswith("Opening") or uid.startswith("Ending")):
+                continue
+            kind = "OP" if uid.startswith("Opening") else "ED"
+            if kind not in options["types"]:
+                continue
+            try:
+                details = openings_details(uid)
+            except GameError as exc:
+                LOG.warning("Fallback details failed for %s: %s", uid, exc)
+                continue
+            if ((details.get("nsfw") and not options.get("allowNsfw", False))
+                    or (details.get("spoiler") and not options.get("allowSpoilers", False))):
+                continue
+            song = record.get("song") or {}
+            aliases = [title]
+            if engine.normalize(record["source"]) != engine.normalize(title):
+                aliases.append(record["source"])
+            songs.append({"id": f"om-{uid}", "anime": title, "aliases": aliases,
+                "song": song.get("title") or "Unknown title", "artist": song.get("artist") or "Artist not listed",
+                "type": kind, "year": None,
+                "media": f"https://openings.moe/video/{details['file']}.webm"})
+            if len(songs) >= limit:
+                return songs
     return songs
 
 
@@ -318,6 +379,12 @@ def _prepare(load_id, options, usernames):
                     if not load_errors:
                         load_errors.append(str(exc))
                     warnings.extend(title for _, title in batch)
+                    try:
+                        songs.extend(songs_from_openings(batch, options, max(30, options["rounds"] * 3) - len(songs)))
+                    except GameError as fallback_exc:
+                        LOG.warning("Fallback lookup failed: %s", fallback_exc)
+                        if not load_errors:
+                            load_errors.append(str(fallback_exc))
                 if len(songs) >= max(30, options["rounds"] * 3):
                     break
         songs = list({song["id"]: song for song in songs}.values())
