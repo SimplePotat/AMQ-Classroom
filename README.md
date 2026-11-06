@@ -1,4 +1,4 @@
-# LAN hosted AMQ clone with Kahoot style whiteboard display
+# AMQ-Classroom
 
 An AMQ-inspired, local-network edition of [przemub/anime_quiz](https://github.com/przemub/anime_quiz). One classroom screen plays the music and reveals the video. Everyone else joins on a phone or laptop, guesses the anime, and gets scored automatically.
 
