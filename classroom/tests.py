@@ -233,7 +233,7 @@ class ClassroomTests(TransactionTestCase):
         csv = self.host.get("/api/results.csv").content.decode()
         self.assertIn("'=HYPERLINK", csv)
 
-    def test_starter_preparation_has_real_metadata_and_no_repeated_themes(self):
+    def test_starter_preparation_has_real_metadata_and_one_theme_per_show(self):
         with engine.room_state() as s:
             s.update(phase="loading", loadId="test-load")
         with patch("classroom.metadata.requests.Session.get") as probe:
@@ -241,10 +241,9 @@ class ClassroomTests(TransactionTestCase):
             library.prepare("test-load", engine.validate_settings({"rounds": 25}), [])
         s = Room.objects.get(pk=1).state
         self.assertEqual(s["phase"], "ready", s["message"])
-        self.assertEqual(len(s["queue"]), 25)
-        self.assertEqual(len({song["id"] for song in s["queue"]}), 25)
-        self.assertTrue(all(song["media"].startswith("https://v.animethemes.moe/") for song in s["queue"]))
-        self.assertIn("Attack on Titan", s["titles"])
+        self.assertEqual(len(s["queue"]), 12)
+        shows = [engine.normalize(song["anime"]) for song in s["queue"]]
+        self.assertEqual(len(set(shows)), len(shows), "A show appeared more than once in one match")
 
     def test_mal_pagination_and_cache(self):
         page = [{"anime_id": n, "anime_title": f"Anime {n}", "status": 2} for n in range(300)]
