@@ -1,5 +1,6 @@
 """Best-effort, bounded lobby warming. Foreground preparation always wins."""
 import logging
+import math
 import threading
 import time
 from collections import OrderedDict
@@ -13,9 +14,8 @@ from .models import Room
 
 LOG = logging.getLogger(__name__)
 MAX_PENDING = 100
-MAX_TITLES = 40
-REQUEST_BUDGET = 8
 JOB_SECONDS = 60
+WARM_SECONDS_PER_BATCH = 6
 COOLDOWN_SECONDS = 300
 LOCK = threading.Lock()
 PENDING = OrderedDict()
@@ -70,16 +70,17 @@ def _warm(profile_id, username):
         if (not s or s["phase"] != "lobby" or s["settings"]["source"] == "local" or not player
                 or player["mal"].casefold() != username.casefold()):
             raise InterruptedError()
-        return s["settings"]["statuses"][:]
 
-    statuses = check()
-    with metadata.work_context(check=check, background=True, request_budget=REQUEST_BUDGET):
+    check()
+    with metadata.work_context(check=check, background=True):
         entries = library.mal_list(username)
-        candidates = list(dict(library.list_candidates(entries, statuses)))
+        candidates = list(dict(library.list_candidates(entries, library.ALL_MAL_STATUSES)))
         library.RANDOM.shuffle(candidates)
-        for offset in range(0, min(len(candidates), MAX_TITLES), library.ANIME_BATCH_SIZE):
+        batches = math.ceil(len(candidates) / library.ANIME_BATCH_SIZE)
+        deadline = time.monotonic() + JOB_SECONDS + batches * WARM_SECONDS_PER_BATCH
+        for offset in range(0, len(candidates), library.ANIME_BATCH_SIZE):
             metadata.checkpoint()
-            library.anime_data_batch(candidates[offset:min(offset + library.ANIME_BATCH_SIZE, MAX_TITLES)])
+            library.anime_data_batch(candidates[offset:offset + library.ANIME_BATCH_SIZE])
 
 
 def _run():
