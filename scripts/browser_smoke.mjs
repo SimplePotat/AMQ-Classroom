@@ -121,6 +121,8 @@ try {
   if(videoFixture)assert.equal(await video.evaluate(v=>v.videoWidth>0&&v.videoHeight>0),true,'Video did not decode');
   assert.equal(await video.evaluate(v=>Number(getComputedStyle(v).opacity)),0,'Video visible while guessing');
   assert.equal(await player.locator('video').count(),0,'Player should not receive media');
+  assert.equal(await player.locator('[data-command]').count(),0,'Player shell must not show host-only skip or advance controls');
+  await host.getByRole('button',{name:'Skip',exact:true}).waitFor();
   await host.getByText('ROUND 01 / 02',{exact:true}).waitFor();
   await player.getByLabel('Your anime guess').fill('unsent draft');
   await host.getByRole('button',{name:'Ⅱ Pause',exact:true}).click();
@@ -146,6 +148,7 @@ try {
   assert.equal(game.players.reduce((sum,p)=>sum+p.score,0),1,'Exactly one player should score');
   assert.equal(await video.evaluate(v=>Number(getComputedStyle(v).opacity)),1,'Video not revealed');
   await host.locator('#stage-top').waitFor({state:'hidden'});
+  assert.equal(await player.locator('[data-command]').count(),0,'Player shell must stay free of host-only controls during reveal');
   await host.screenshot({path:join(output,'host-reveal.png'),fullPage:true});
   await host.getByRole('button',{name:'Next song'}).click();
   await waitState(host,s=>s.phase==='guess');
