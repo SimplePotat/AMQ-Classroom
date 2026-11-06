@@ -754,20 +754,6 @@ footer b {
   color:var(--muted)
 }
 
-.side-note {
-  margin:18px 6px 0;
-  display:flex;
-  gap:11px;
-  color:var(--muted);
-  font-size:10px;
-  line-height:1.7
-}
-
-.side-note b {
-  color:var(--pink);
-  font-size:18px
-}
-
 .roster {
   margin-top:23px
 }
@@ -1742,9 +1728,6 @@ dialog::backdrop {
   }
   .room-side .join-panel {
     margin:0
-  }
-  .room-side .side-note {
-    display:none
   }
   .room-side .leaderboard {
     grid-column:2;
