@@ -1,4 +1,4 @@
-# Anime Quiz · Classroom
+# LAN hosted AMQ clone with Kahoot style whiteboard display
 
 An AMQ-inspired, local-network edition of [przemub/anime_quiz](https://github.com/przemub/anime_quiz). One classroom screen plays the music and reveals the video. Everyone else joins on a phone or laptop, guesses the anime, and gets scored automatically.
 
@@ -72,19 +72,11 @@ This implements the core AMQ-style quiz loop for a classroom. It does not recrea
 
 The included catalog contains verified AnimeThemes metadata for 12 familiar series. It includes openings and endings, alternative titles, and stream URLs. **It does not bundle copyrighted music or video.** The host needs internet to stream those videos; player devices only talk to the local server. The catalog excludes entries flagged explicit, and excludes spoiler-tagged entries unless the host enables them.
 
-To refresh the starter metadata:
-
-```sh
-.venv/bin/python scripts/build_starter.py
-```
-
 ### Group MAL lists
 
 Players save their **username**, never their MAL password. Choose **Group's MAL lists** in quiz settings. Lists must be public. Watching and Completed are selected by default; On hold, Dropped, and Plan to watch are optional.
 
-The server combines the selected lists, samples up to 80 anime in randomized order, and looks up their themes on AnimeThemes. It stops when there are enough candidates for the requested quiz. MAL responses are cached for seven days and AnimeThemes metadata for 30 days. The selection is a union of the group's lists, not a guarantee of equal representation per player. Every selected theme is unique within a quiz.
-
-A missing/private list is skipped with a warning visible to the host; other players' valid lists can still produce a quiz. If all lists fail, preparation stops with an error. Provider rate limits also stop preparation. Imports accept up to 20,000 entries per list, and the combined anime pool and autocomplete are capped at 20,000. Some anime have no suitable video; if fewer songs match than requested, the host sees the actual round count before starting. Internet filters can prevent online loading.
+The server combines the selected lists, samples up to 80 anime in randomized order, and looks up their themes on AnimeThemes. It stops when there are enough candidates for the requested quiz. MAL responses are cached for seven days and AnimeThemes metadata for 30 days.
 
 ### Fully local / offline music
 
@@ -148,18 +140,6 @@ HTTP does not encrypt passcodes or session cookies in transit. Use classroom-spe
 Only one host display should play audio. The host should keep its tab active. New players joining during a game spectate until the next game. There is no automatic account recovery; keep player passcodes somewhere the players can remember. Registered names and passcodes belong to this local server, not to MAL.
 
 The roster supports 100 entries. Automated verification covers six browser participants and concurrent state updates, not a 100-device classroom load test.
-
-### Updating an existing installation
-
-Stop the server, back up `data/`, pull the latest source, then update dependencies before restarting:
-
-```sh
-.venv/bin/python -m pip install --upgrade 'pip>=26.2,<27'
-.venv/bin/python -m pip install --upgrade -r requirements-classroom.txt
-./start-classroom.sh
-```
-
-On Windows, substitute `.venv\Scripts\python.exe` and `start-classroom.cmd`. Existing virtual environments are not automatically upgraded by the launcher. Old host sessions must sign in again after this security update; saved player profiles and game results remain available. See [the security review](docs/SECURITY_REVIEW.md) for findings, verification and scope.
 
 ## Development and verification
 
