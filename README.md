@@ -4,7 +4,7 @@ An AMQ-inspired, local-network edition of [przemub/anime_quiz](https://github.co
 
 **Host:** `http://localhost:8009/host` · **Players:** `http://YOUR-LAN-IP:8009`
 
-![The classroom host lobby](docs/host-lobby.png)
+![The updated classroom host lobby](docs/host-lobby.png)
 
 ## Start a classroom
 
