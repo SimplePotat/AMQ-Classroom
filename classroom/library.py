@@ -5,22 +5,29 @@ import random
 import secrets
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-import requests
 from django.conf import settings
 from django.db import close_old_connections
 from .engine import GameError, room_state
 from .models import CachedResource
+from . import metadata
+from .metadata import get_json
 
 LOG = logging.getLogger(__name__)
 RANDOM = random.SystemRandom()
 API = "https://api.animethemes.moe"
-JSON_HOSTS = frozenset({"api.animethemes.moe", "myanimelist.net"})
-MAX_JSON_BYTES = 4 * 1024 * 1024
 MAX_MAL_ENTRIES = 20_000
 MAX_CANDIDATES = 20_000
+MAX_THEME_CANDIDATES = 80
+ANIME_BATCH_SIZE = 10
+ANIME_PAGE_SIZE = 15
+MAX_ANIME_PAGES = 10
+ANIME_TTL = 30 * 86400
+MISSING_ANIME_TTL = 86400
+CACHE_LOCK = threading.RLock()
 INCLUDE = "animethemes.animethemeentries.videos,animethemes.song.artists,animesynonyms,resources"
 STARTER = [
     (1, "Cowboy Bebop"), (1535, "Death Note"), (5114, "Fullmetal Alchemist: Brotherhood"),
@@ -30,45 +37,31 @@ STARTER = [
 ]
 
 
+@contextmanager
+def cache_work():
+    # Recheck after acquiring the lock so prefetch and preparation share misses.
+    # No database transaction or room lock is held during provider requests.
+    while not CACHE_LOCK.acquire(timeout=0.1):
+        metadata.checkpoint()
+    try:
+        metadata.checkpoint()
+        yield
+    finally:
+        CACHE_LOCK.release()
+
+
 def cached(key, seconds, fetch):
+    metadata.checkpoint()
     entry = CachedResource.objects.filter(key=key, expires_at__gt=time.time()).first()
     if entry:
         return entry.value
-    value = fetch()
-    CachedResource.objects.update_or_create(key=key, defaults={"value": value, "expires_at": time.time() + seconds})
-    return value
-
-
-def get_json(url, params=None):
-    # Only the two metadata providers are contacted by the server. In particular,
-    # a provider redirect must not turn this into a request to a LAN service.
-    try:
-        target = urlparse(url)
-        allowed = (target.scheme == "https" and target.hostname in JSON_HOSTS
-                   and target.port in (None, 443) and not target.username and not target.password)
-    except ValueError:
-        allowed = False
-    if not allowed:
-        raise GameError("The metadata provider address is not allowed.")
-    try:
-        with requests.get(url, params=params, timeout=(5, 20), stream=True, allow_redirects=False,
-                headers={"User-Agent": "AnimeQuizClassroom/1.0 (+https://github.com/SimplePotat/anime-quiz-classroom)"}) as response:
-            if response.status_code == 429:
-                raise GameError("The music provider is rate limiting requests. Wait a minute and try again.")
-            if 300 <= response.status_code < 400:
-                raise GameError("The metadata provider returned an unexpected redirect.")
-            response.raise_for_status()
-            length = response.headers.get("Content-Length", "")
-            if length.isdigit() and int(length) > MAX_JSON_BYTES:
-                raise GameError("The metadata provider response is too large.")
-            body = bytearray()
-            for chunk in response.iter_content(chunk_size=65536):
-                if len(body) + len(chunk) > MAX_JSON_BYTES:
-                    raise GameError("The metadata provider response is too large.")
-                body.extend(chunk)
-            return json.loads(body)
-    except (requests.RequestException, ValueError) as exc:
-        raise GameError("The music provider could not be reached. Check the host's internet connection or use a local catalog.") from exc
+    with cache_work():
+        entry = CachedResource.objects.filter(key=key, expires_at__gt=time.time()).first()
+        if entry:
+            return entry.value
+        value = fetch()
+        CachedResource.objects.update_or_create(key=key, defaults={"value": value, "expires_at": time.time() + seconds})
+        return value
 
 
 def mal_list(username):
@@ -95,16 +88,98 @@ def mal_list(username):
     return cached(f"mal:{username.casefold()}", 7 * 86400, fetch)
 
 
-def anime_data(mal_id, title):
-    def fetch():
-        matches = get_json(API + "/search", {"q": title, "fields[search]": "anime"}).get("search", {}).get("anime", [])
-        for match in matches[:5]:
-            anime = get_json(API + "/anime/" + quote(match["slug"], safe=""), {"include": INCLUDE})["anime"]
-            ids = [str(r["external_id"]) for r in anime.get("resources", []) if r["site"] == "MyAnimeList"]
-            if str(mal_id) in ids:
-                return anime
-        return {}
-    return cached(f"anime:{mal_id}", 30 * 86400, fetch)
+def _fetch_anime_batch(mal_ids):
+    found = {mal_id: [] for mal_id in mal_ids}
+    requested = {str(mal_id): mal_id for mal_id in mal_ids}
+    seen = set()
+    for page in range(1, MAX_ANIME_PAGES + 1):
+        data = get_json(API + "/anime", {
+            "filter[has]": "resources", "filter[site]": "MyAnimeList",
+            "filter[external_id]": ",".join(requested), "include": INCLUDE,
+            "page[size]": ANIME_PAGE_SIZE, "page[number]": page,
+        })
+        if (not isinstance(data, dict) or not isinstance(data.get("anime"), list)
+                or len(data["anime"]) > ANIME_PAGE_SIZE or not isinstance(data.get("links"), dict)
+                or "next" not in data["links"]):
+            raise GameError("The music provider returned invalid anime data.")
+        next_page = data["links"]["next"]
+        if next_page is not None and (not isinstance(next_page, str) or not next_page):
+            raise GameError("The music provider returned invalid anime data.")
+        for anime in data["anime"]:
+            if (not isinstance(anime, dict) or type(anime.get("id")) is not int
+                    or anime["id"] in seen or not isinstance(anime.get("name"), str)
+                    or not anime["name"] or not isinstance(anime.get("resources"), list)
+                    or not isinstance(anime.get("animethemes"), list)
+                    or not isinstance(anime.get("animesynonyms"), list)):
+                raise GameError("The music provider returned invalid anime data.")
+            seen.add(anime["id"])
+            matched = {requested[str(resource.get("external_id"))] for resource in anime["resources"]
+                       if isinstance(resource, dict) and resource.get("site") == "MyAnimeList"
+                       and str(resource.get("external_id")) in requested}
+            if not matched:
+                raise GameError("The music provider returned invalid anime data.")
+            for mal_id in matched:
+                found[mal_id].append(anime)
+        if next_page is None:
+            return found
+        if not data["anime"]:
+            break
+        # Increment our own page parameter. Never request an untrusted next URL.
+    raise GameError("The music provider returned too many anime pages.")
+
+
+def _load_anime_batch(mal_ids):
+    try:
+        found = _fetch_anime_batch(mal_ids)
+    except metadata.ResponseTooLarge:
+        # Large franchises can exceed the transport cap even in a small batch.
+        if len(mal_ids) == 1:
+            raise
+        middle = len(mal_ids) // 2
+        return {**_load_anime_batch(mal_ids[:middle]), **_load_anime_batch(mal_ids[middle:])}
+    now = time.time()
+    CachedResource.objects.bulk_create([
+        CachedResource(key=f"anime:mal:{mal_id}", value=anime,
+                       expires_at=now + (ANIME_TTL if anime else MISSING_ANIME_TTL))
+        for mal_id, anime in found.items()
+    ], update_conflicts=True, unique_fields=["key"], update_fields=["value", "expires_at"])
+    return found
+
+
+def _cached_anime(ids):
+    keys = [key for i in ids for key in (f"anime:mal:{i}", f"anime:{i}")]
+    entries = CachedResource.objects.filter(key__in=keys, expires_at__gt=time.time()).in_bulk(field_name="key")
+    found = {}
+    for mal_id in ids:
+        entry = entries.get(f"anime:mal:{mal_id}")
+        if entry and isinstance(entry.value, list):
+            found[mal_id] = entry.value
+            continue
+        # Reuse successful old title lookups, but retry their false misses.
+        legacy = entries.get(f"anime:{mal_id}")
+        if legacy and isinstance(legacy.value, dict) and legacy.value:
+            found[mal_id] = [legacy.value]
+    return found
+
+
+def anime_data_batch(mal_ids):
+    """Resolve exact MAL IDs; preserve every AnimeThemes record for each ID."""
+    ids = list(mal_ids)
+    if len(ids) > MAX_THEME_CANDIDATES or any(type(i) is not int or i <= 0 for i in ids):
+        raise GameError("Invalid anime lookup IDs.")
+    ids = list(dict.fromkeys(ids))
+    metadata.checkpoint()
+    # Cache hits must not wait for an unrelated background HTTP request.
+    found = _cached_anime(ids)
+    ids = [i for i in ids if i not in found]
+    for offset in range(0, len(ids), ANIME_BATCH_SIZE):
+        batch = ids[offset:offset + ANIME_BATCH_SIZE]
+        with cache_work():
+            found.update(_cached_anime(batch))
+            missing = [i for i in batch if i not in found]
+            if missing:
+                found.update(_load_anime_batch(missing))
+    return found
 
 
 def songs_from_anime(anime, title, options):
@@ -160,6 +235,28 @@ def media_path(name):
 
 
 def prepare(load_id, options, usernames):
+    def check():
+        with room_state() as s:
+            if s["loadId"] != load_id or s["phase"] != "loading":
+                raise InterruptedError()
+
+    with metadata.work_context(check=check):
+        try:
+            _prepare(load_id, options, usernames)
+        finally:
+            metadata.close_session()
+
+
+def list_candidates(entries, statuses):
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("status") not in statuses:
+            continue
+        mal_id, title = entry.get("anime_id"), entry.get("anime_title")
+        if (type(mal_id) is int and mal_id > 0 and isinstance(title, str) and 1 <= len(title) <= 500):
+            yield mal_id, title
+
+
+def _prepare(load_id, options, usernames):
     close_old_connections()
     try:
         def progress(message, value):
@@ -189,13 +286,7 @@ def prepare(load_id, options, usernames):
                         raise
                     skipped_users.append(username)
                     continue
-                for entry in entries:
-                    if not isinstance(entry, dict) or entry.get("status") not in options["statuses"]:
-                        continue
-                    mal_id, title = entry.get("anime_id"), entry.get("anime_title")
-                    if (not isinstance(mal_id, int) or isinstance(mal_id, bool) or mal_id <= 0
-                            or not isinstance(title, str) or not 1 <= len(title) <= 500):
-                        continue
+                for mal_id, title in list_candidates(entries, options["statuses"]):
                     if mal_id not in anime_map and len(anime_map) >= MAX_CANDIDATES:
                         pool_limited = True
                         continue
@@ -208,18 +299,22 @@ def prepare(load_id, options, usernames):
             titles.update(anime_map.values())
             candidates = list(anime_map.items())
             RANDOM.shuffle(candidates)
+            candidates = candidates[:MAX_THEME_CANDIDATES]
             songs = []
-            for i, (mal_id, title) in enumerate(candidates[:80]):
-                progress(f"Finding themes · {title}", min(95, 15 + round(80 * i / min(len(candidates), 80))))
+            for i in range(0, len(candidates), ANIME_BATCH_SIZE):
+                batch = candidates[i:i + ANIME_BATCH_SIZE]
+                progress(f"Finding themes · {batch[0][1]}", min(95, 15 + round(80 * i / len(candidates))))
                 try:
-                    songs.extend(songs_from_anime(anime_data(mal_id, title), title, options))
+                    resolved = anime_data_batch([mal_id for mal_id, _ in batch])
+                    for mal_id, title in batch:
+                        for anime in resolved[mal_id]:
+                            songs.extend(songs_from_anime(anime, title, options))
                 except GameError as exc:
                     if "rate limiting" in str(exc):
                         raise
-                    warnings.append(title)
+                    warnings.extend(title for _, title in batch)
                 if len(songs) >= max(30, options["rounds"] * 3):
                     break
-                time.sleep(0.25)
         songs = list({song["id"]: song for song in songs}.values())
         if not songs:
             raise GameError("No playable songs matched these settings. Try another source or enable both OP and ED.")

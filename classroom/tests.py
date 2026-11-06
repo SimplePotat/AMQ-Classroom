@@ -20,6 +20,7 @@ def song(round_id="round-one", **changes):
         "type": "OP", "year": 2013, "media": "test.wav", "startAt": 0, **changes}
 
 
+@override_settings(CLASSROOM_PREWARM_ENABLED=False)
 class ClassroomTests(TransactionTestCase):
     def setUp(self):
         views.ATTEMPTS.clear()

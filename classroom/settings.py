@@ -57,3 +57,4 @@ TIME_ZONE = "UTC"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024
 TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "APP_DIRS": True}]
 SOURCE_URL = os.environ.get("CLASSROOM_SOURCE_URL", "https://github.com/SimplePotat/anime-quiz-classroom")
+CLASSROOM_PREWARM_ENABLED = os.environ.get("CLASSROOM_PREWARM", "1") == "1"

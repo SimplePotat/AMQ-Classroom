@@ -130,6 +130,13 @@ On POSIX systems, startup restricts the data directory to its owner (`0700`) and
 | `CLASSROOM_SECRET_KEY` | Override the generated Django secret |
 | `CLASSROOM_ALLOWED_HOSTS` | Optional comma-separated HTTP host allowlist; LAN IP access is accepted by default |
 | `CLASSROOM_SOURCE_URL` | Link to your own modified source when distributing another variant |
+| `CLASSROOM_PREWARM` | Set to `0` to disable background MAL/theme cache warming (enabled by default) |
+
+MAL lists are cached for seven days. AnimeThemes lookups use its [documented resource filters](https://github.com/AnimeThemes/animethemes-api-docs/blob/main/docs/jsonapi/intro/jsonapi/index.md#has-filter) to match exact MAL IDs in batches of ten, with pagination and [pooled HTTP connections](https://requests.readthedocs.io/en/stable/user/advanced/#session-objects) per worker. Successful theme lookups are cached for 30 days; confirmed missing IDs for one day. Existing successful cache entries remain usable. Failed or incomplete responses are not cached as missing anime.
+
+Saving a MAL username or joining/marking ready in the lobby queues optional cache warming. One background worker serves at most 100 pending profiles, coalesces repeated edits, and applies a five-minute cooldown per profile and MAL username. Each job warms at most 40 anime, makes at most eight metadata requests, and stops starting work after 60 seconds. Warming skips local mode and yields when quiz preparation or gameplay starts; an already-running request can finish. It downloads metadata, not music or video, and never changes the quiz or leaderboard. Preparations still choose candidates randomly, so a large list or short lobby wait can leave cache misses.
+
+AnimeThemes [documents a limit of 90 requests per minute](https://github.com/AnimeThemes/animethemes-api-docs/blob/main/docs/jsonapi/intro/ratelimiting/index.md). All metadata work shares provider pacing (at most one request per second, or one every two seconds for background work) and honors `Retry-After` on rate limiting. The providers' quotas may also be used by other clients on the same public IP. Batching reduces request counts substantially, but fixed speedup or cache-hit percentages depend on the lists, pagination, network, and cache contents.
 
 Run **one server process per data directory**. The threaded Waitress server serializes room transitions and persists them atomically in SQLite. The browser polls once a second; countdowns interpolate from server time. This is designed for a trusted classroom LAN over HTTP, not as a public internet service. Host actions require a host session; player mutations require a signed-in profile, and all state-changing requests use Django CSRF protection.
 

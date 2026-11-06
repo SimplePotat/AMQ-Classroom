@@ -15,7 +15,7 @@ await mkdir(output,{recursive:true});
 execFileSync(python,[join(root,'scripts/make_test_catalog.py'),data]);
 const videoFixture=JSON.parse(await readFile(join(data,'catalog.json'),'utf8'))[0].media.endsWith('.webm');
 const server=spawn(python,['run_classroom.py','--host','127.0.0.1','--port',String(port),'--advertise',base],{
-  cwd:root,env:{...process.env,CLASSROOM_DATA_DIR:data,CLASSROOM_HOST_KEY:hostKey},stdio:['ignore','pipe','pipe']});
+  cwd:root,env:{...process.env,CLASSROOM_DATA_DIR:data,CLASSROOM_HOST_KEY:hostKey,CLASSROOM_PREWARM:'0'},stdio:['ignore','pipe','pipe']});
 let logs='', browser;
 server.stderr.on('data',chunk=>{logs+=chunk;});
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));

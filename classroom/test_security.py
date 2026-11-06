@@ -17,7 +17,7 @@ from . import engine, views
 from .models import Profile
 
 
-@override_settings(ALLOWED_HOSTS=["testserver"])
+@override_settings(ALLOWED_HOSTS=["testserver"], CLASSROOM_PREWARM_ENABLED=False)
 class SecurityRegressionTests(TransactionTestCase):
     def setUp(self):
         views.ATTEMPTS.clear()

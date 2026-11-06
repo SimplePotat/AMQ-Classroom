@@ -22,7 +22,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET
 
-from . import engine, library
+from . import engine, library, prefetch
 from .models import Profile, GameResult
 
 ATTEMPTS = defaultdict(deque)
@@ -198,6 +198,7 @@ def auth(request):
         request.session.pop("host_grant", None)
         request.session["profile_id"] = profile.pk
         rotate_token(request)
+        prefetch.schedule(profile.pk)
     return {"ok": True}
 
 
@@ -232,6 +233,8 @@ def player(request):
             s["players"].pop(str(profile.pk), None)
         elif action != "profile":
             raise engine.GameError("Unknown player action.")
+    if action in ("join", "profile", "ready"):
+        prefetch.schedule(profile.pk)
     return {"ok": True}
 
 

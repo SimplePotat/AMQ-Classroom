@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase, TransactionTestCase
 
-from . import engine, library
+from . import engine, library, metadata
 from .models import Room
 
 
@@ -18,12 +18,18 @@ def provider_response(status=200, chunks=(b'{"ok":true}',), length=None):
 
 
 class MetadataTransportSecurityTests(SimpleTestCase):
+    def setUp(self):
+        limiter = patch("classroom.metadata.wait_for_provider")
+        limiter.start()
+        self.addCleanup(limiter.stop)
+        self.addCleanup(metadata.close_session)
+
     def test_only_exact_https_metadata_providers_are_requested(self):
         for url in ("http://myanimelist.net/list", "https://localhost/list",
                     "https://api.animethemes.moe.attacker.example/",
                     "https://api.animethemes.moe:8443/", "https://user@myanimelist.net/",
                     "https://127.0.0.1/", "https://api.animethemes.moe:bad/"):
-            with self.subTest(url=url), patch("classroom.library.requests.get") as request:
+            with self.subTest(url=url), patch("classroom.metadata.requests.Session.get") as request:
                 with self.assertRaises(engine.GameError):
                     library.get_json(url)
                 request.assert_not_called()
@@ -31,7 +37,7 @@ class MetadataTransportSecurityTests(SimpleTestCase):
     def test_redirects_are_rejected_without_following_them(self):
         response = provider_response(status=302)
         response.headers["Location"] = "http://127.0.0.1/private"
-        with patch("classroom.library.requests.get", return_value=response) as request:
+        with patch("classroom.metadata.requests.Session.get", return_value=response) as request:
             with self.assertRaisesMessage(engine.GameError, "redirect"):
                 library.get_json(library.API + "/search")
         self.assertIs(request.call_args.kwargs["allow_redirects"], False)
@@ -39,8 +45,8 @@ class MetadataTransportSecurityTests(SimpleTestCase):
         response.__exit__.assert_called_once()
 
     def test_declared_oversized_responses_are_rejected_before_reading(self):
-        response = provider_response(length=library.MAX_JSON_BYTES + 1)
-        with patch("classroom.library.requests.get", return_value=response):
+        response = provider_response(length=metadata.MAX_JSON_BYTES + 1)
+        with patch("classroom.metadata.requests.Session.get", return_value=response):
             with self.assertRaisesMessage(engine.GameError, "too large"):
                 library.get_json(library.API + "/search")
         response.iter_content.assert_not_called()
@@ -48,15 +54,15 @@ class MetadataTransportSecurityTests(SimpleTestCase):
 
     def test_stream_limit_applies_without_a_content_length(self):
         response = provider_response(chunks=(b"12345", b"67890", b"extra"))
-        with patch("classroom.library.MAX_JSON_BYTES", 9), patch(
-                "classroom.library.requests.get", return_value=response):
+        with patch("classroom.metadata.MAX_JSON_BYTES", 9), patch(
+                "classroom.metadata.requests.Session.get", return_value=response):
             with self.assertRaisesMessage(engine.GameError, "too large"):
                 library.get_json(library.API + "/search")
         response.__exit__.assert_called_once()
 
     def test_small_streams_parse_json_and_close_the_response(self):
         response = provider_response(chunks=(b'{"ok":', b"true}"))
-        with patch("classroom.library.requests.get", return_value=response) as request:
+        with patch("classroom.metadata.requests.Session.get", return_value=response) as request:
             self.assertEqual(library.get_json(library.API + "/search"), {"ok": True})
         self.assertIs(request.call_args.kwargs["stream"], True)
         response.__exit__.assert_called_once()
@@ -70,7 +76,7 @@ class GroupListSecurityTests(TransactionTestCase):
         song = {"id": "theme", "anime": "Playable title", "aliases": ["Playable alias"],
                 "song": "Test song", "artist": "Test artist", "type": "OP", "media": "test.webm"}
         with patch("classroom.library.mal_list", side_effect=lists), patch(
-                "classroom.library.anime_data", return_value={}), patch(
+                "classroom.library.anime_data_batch", side_effect=lambda ids: {i: [{}] for i in ids}), patch(
                 "classroom.library.songs_from_anime", return_value=[song]), patch("classroom.library.time.sleep"):
             library.prepare("security-test", options, [f"player_{i}" for i in range(len(lists))])
         return Room.objects.get(pk=1).state
