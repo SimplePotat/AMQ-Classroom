@@ -37,6 +37,17 @@ def mal_entries(count):
     return [{"anime_id": i, "anime_title": f"Title {i}", "status": 2} for i in range(1, count + 1)]
 
 
+def openings_record(uid, source):
+    return {"uid": uid, "song": {"title": f"Song {uid}", "artist": "Openings Artist"},
+            "source": source, "subtitles": True}
+
+
+def openings_payload(uid):
+    return {"data": {"title": f"Song {uid}", "file": uid, "mime": "video/webm", "type": "OP",
+                     "uid": uid, "song": {"title": f"Song {uid}", "artist": "Openings Artist"},
+                     "source": uid, "path": "video"}}
+
+
 class AnimeBatchCacheTests(TransactionTestCase):
     def test_forty_cold_ids_use_four_requests_and_warm_ids_use_none(self):
         with patch("classroom.library.get_json", side_effect=batch_response) as fetch:
@@ -433,6 +444,114 @@ class LobbyCacheTests(TransactionTestCase):
         self.assertIsNone(prefetch.WORKER)
         self.assertEqual(Room.objects.get(pk=1).state, before)
         close.assert_called_once()
+
+
+class OpeningsFallbackTests(TransactionTestCase):
+    def setUp(self):
+        with engine.room_state() as state:
+            state["players"] = {str(i): {"mal": f"player_{i}", "name": f"Player {i}", "ready": True}
+                                for i in range(1, 4)}
+
+    def test_anime_themes_failure_falls_back_to_openings(self):
+        catalog = [openings_record("Opening1-title-1", "Title 1"), openings_record("Ending1-title-1", "Title 1"),
+                   openings_record("Opening1-title-2", "Title 2")]
+        details = []
+
+        def respond(url, params=None):
+            if "api.animethemes.moe" in url:
+                raise engine.GameError("The music provider could not be reached. Check the host's internet connection or use a local catalog.")
+            if "openings.moe/api/list.php" in url:
+                return catalog
+            details.append(params["uid"])
+            return openings_payload(params["uid"])
+
+        with engine.room_state() as state:
+            state.update(phase="loading", loadId="openings")
+        with patch("classroom.library.mal_list", return_value=mal_entries(2)), patch(
+                "classroom.library.get_json", side_effect=respond):
+            library.prepare("openings", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+        state = Room.objects.get(pk=1).state
+        self.assertEqual(state["phase"], "ready", state["message"])
+        songs = state["queue"]
+        self.assertTrue(all(song["media"].startswith("https://openings.moe/video/") for song in songs))
+        self.assertTrue(all(song["type"] == "OP" for song in songs))
+        self.assertNotIn("om-Ending1-title-1", [song["id"] for song in songs])
+        self.assertFalse(any(song["id"].startswith("at-") for song in songs))
+        self.assertTrue(details)
+
+    def test_healthy_anime_themes_never_touches_the_fallback(self):
+        catalog = [openings_record("Opening1-title-1", "Title 1"), openings_record("Opening1-title-2", "Title 2")]
+        touched = []
+
+        def respond(url, params=None):
+            if "openings.moe" in url:
+                touched.append(url)
+                return catalog if "list.php" in url else openings_payload(params["uid"])
+            return batch_response(url, params)
+
+        with engine.room_state() as state:
+            state.update(phase="loading", loadId="healthy")
+        with patch("classroom.library.mal_list", return_value=mal_entries(2)), patch(
+                "classroom.library.get_json", side_effect=respond):
+            library.prepare("healthy", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+        state = Room.objects.get(pk=1).state
+        self.assertEqual(state["phase"], "ready", state["message"])
+        self.assertTrue(any(song["id"].startswith("at-") for song in state["queue"]))
+        self.assertEqual(touched, [])
+
+    def test_fallback_details_failure_skips_that_record(self):
+        catalog = [openings_record("Opening1-title-1", "Title 1"), openings_record("Opening1-title-2", "Title 2")]
+
+        def respond(url, params=None):
+            if "api.animethemes.moe" in url:
+                raise engine.GameError("The music provider could not be reached. Check the host's internet connection or use a local catalog.")
+            if "openings.moe/api/list.php" in url:
+                return catalog
+            if params["uid"] == "Opening1-title-1":
+                raise engine.GameError("The music provider returned invalid anime data.")
+            return openings_payload(params["uid"])
+
+        with engine.room_state() as state:
+            state.update(phase="loading", loadId="broken-details")
+        with patch("classroom.library.mal_list", return_value=mal_entries(2)), patch(
+                "classroom.library.get_json", side_effect=respond):
+            library.prepare("broken-details", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+        state = Room.objects.get(pk=1).state
+        self.assertEqual(state["phase"], "ready", state["message"])
+        self.assertEqual([song["id"] for song in state["queue"]], ["om-Opening1-title-2"])
+
+    def test_normalization_matches_titles_with_punctuation(self):
+        catalog = [openings_record("Opening1-baccano", "Baccano")]
+
+        def respond(url, params=None):
+            if "api.animethemes.moe" in url:
+                raise engine.GameError("The music provider could not be reached. Check the host's internet connection or use a local catalog.")
+            if "openings.moe/api/list.php" in url:
+                return catalog
+            return openings_payload(params["uid"])
+
+        with engine.room_state() as state:
+            state.update(phase="loading", loadId="baccano")
+        with patch("classroom.library.mal_list", return_value=[
+            {"anime_id": 3, "anime_title": "Baccano!", "status": 2}]), patch(
+                "classroom.library.get_json", side_effect=respond):
+            library.prepare("baccano", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+        state = Room.objects.get(pk=1).state
+        self.assertEqual(state["phase"], "ready", state["message"])
+        self.assertIn("om-Opening1-baccano", [song["id"] for song in state["queue"]])
+
+    def test_both_providers_failing_reports_the_loaded_error(self):
+        def respond(url, params=None):
+            raise engine.GameError("The music provider could not be reached. Check the host's internet connection or use a local catalog.")
+
+        with engine.room_state() as state:
+            state.update(phase="loading", loadId="both-down")
+        with patch("classroom.library.mal_list", return_value=mal_entries(2)), patch(
+                "classroom.library.get_json", side_effect=respond):
+            library.prepare("both-down", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+        with engine.room_state() as state:
+            self.assertEqual(state["phase"], "lobby")
+            self.assertIn("No songs could be loaded from", state["message"])
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"], CLASSROOM_PREWARM_ENABLED=True)
