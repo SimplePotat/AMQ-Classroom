@@ -208,6 +208,8 @@ def player(request):
     profile = require_profile(request)
     throttle(request, "player", limit=120, window=60)
     action = data.get("action")
+    if action in ("skip", "void", "next", "reveal-ended"):
+        raise engine.GameError("Only the host can skip or advance songs.", 403)
     if action == "profile":
         name, mal, avatar = validate_profile(data)
         profile.name, profile.name_key = name, engine.normalize(name)

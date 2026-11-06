@@ -104,6 +104,13 @@ try {
   await host.getByLabel('Song source').selectOption('mal');
   assert.equal(await nsfwFilter.isEnabled(),true);
   assert.equal(await spoilerFilter.isEnabled(),true);
+  const fullRevealToggle=host.getByLabel('Play each revealed video in full from the start',{exact:false});
+  assert.equal(await fullRevealToggle.isChecked(),false,'Full reveals should be opt-in');
+  await fullRevealToggle.check();
+  assert.equal(await host.getByLabel('Reveal time (seconds)').isDisabled(),true,'Reveal timer stayed editable for a full video reveal');
+  assert.equal(await host.getByText('Advance automatically when the revealed video ends').isVisible(),true,'Auto-advance label did not switch for full reveals');
+  await fullRevealToggle.uncheck();
+  assert.equal(await host.getByLabel('Reveal time (seconds)').isDisabled(),false,'Reveal timer did not return for timed reveals');
   await host.getByRole('button',{name:'Cancel',exact:true}).click();
   await host.getByRole('button',{name:'Start quiz'}).click();
   let game=await waitState(host,s=>s.phase==='guess');
@@ -159,7 +166,7 @@ try {
   await waitState(player,s=>s.me?.mal==='yuki_list');
   // A shared device must not expose one account's unsent draft to another.
   assert.equal((await api(host,'/api/host',{action:'reset'})).status,200);
-  assert.equal((await api(host,'/api/host',{action:'prepare',settings:{...game.settings,source:'local',rounds:1,guessSeconds:60,randomStart:false}})).status,200);
+  assert.equal((await api(host,'/api/host',{action:'prepare',settings:{...game.settings,source:'local',rounds:1,guessSeconds:60,randomStart:false,fullReveal:true,autoAdvance:true}})).status,200);
   await waitState(host,s=>s.phase==='ready');
   assert.equal((await api(host,'/api/host',{action:'start'})).status,200);
   await waitState(host,s=>s.phase==='guess');
@@ -175,8 +182,26 @@ try {
   await player.getByRole('button',{name:'Sign in & join'}).click();
   await player.waitForFunction(()=>document.querySelector('.profile-mini strong')?.textContent==='Yuki');
   assert.equal(await player.getByLabel('Your anime guess').inputValue(),'','Logout did not clear the previous player’s draft');
+  // Full-video reveal: the replay restarts at 0:00, waits for playback to end,
+  // and only the host can skip, void, advance, or report the ending.
+  assert.equal((await api(host,'/api/host',{action:'reveal'})).status,200);
+  const fullReveal=await waitState(host,s=>s.phase==='reveal');
+  assert.equal(fullReveal.deadline,null,'Full reveal still used the reveal timer');
+  assert.equal(fullReveal.remaining,null);
+  await delay(1500);
+  assert.equal(await video.evaluate(v=>v.currentTime<3),true,'Full reveal did not restart the video from the start');
+  assert.equal(await video.evaluate(v=>Number(getComputedStyle(v).opacity)),1,'Video not revealed in full mode');
+  await host.screenshot({path:join(output,'host-full-reveal.png'),fullPage:true});
+  for(const action of ['skip','void','next','reveal-ended']){
+    assert.equal((await api(player,'/api/player',{action,roundId:fullReveal.roundId})).status,403,`Player ${action} was not rejected`);
+    assert.equal((await api(player,'/api/host',{action,roundId:fullReveal.roundId})).status,403,`Player host-route ${action} was not rejected`);
+  }
+  await video.evaluate(v=>{Object.defineProperty(v,'ended',{get:()=>true});});
+  await video.evaluate(v=>v.dispatchEvent(new Event('ended')));
+  const finishedGame=await waitState(host,s=>s.phase==='finished');
+  assert.equal(finishedGame.history.length,1,'Playback-driven advance did not finish the game');
   assert.deepEqual(errors,[],`Browser errors: ${errors.join(', ')}`);
-  console.log(`PASS: six profiles, host + phone + desktop, real audio${videoFixture?' and decoded video':''}, whiteboard, pause/resume, draft preservation and account isolation, reconnect, automatic scoring/reveal, stale-answer rejection, CSV, reusable MAL profile, responsive layout.`);
+  console.log(`PASS: six profiles, host + phone + desktop, real audio${videoFixture?' and decoded video':''}, whiteboard, pause/resume, draft preservation and account isolation, reconnect, automatic scoring/reveal, full-video reveal with host-exclusive controls, stale-answer rejection, CSV, reusable MAL profile, responsive layout.`);
   console.log(`Screenshots: ${output}`);
 }catch(error){
   console.error(logs);throw error;

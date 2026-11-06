@@ -34,7 +34,9 @@ Keep the terminal open. It prints the **player URL** and a private **host key**.
 3. The host chooses **Quiz settings → song source**, prepares the quiz, and presses **Start quiz**.
 4. Music plays only on the host screen. If the browser requests permission, click **Enable / resume audio**. The timer starts after playback begins.
 5. Players submit an anime title. They can revise it until the server closes the round. One correct answer earns one point, regardless of speed.
-6. The video and answer appear, scores update, and the host can review answers before continuing. **Whiteboard** opens a larger, fullscreen-friendly display.
+6. The video and answer appear, scores update, and the host can review answers before continuing. Enable **Play each revealed video in full from the start** in quiz settings to restart at 0:00 and play through to the end. **Whiteboard** opens a larger, fullscreen-friendly display.
+
+Full-video reveals override the reveal timer. With **Advance automatically** enabled, the host screen reports when playback ends and the next song starts then; otherwise, the host chooses **Next song**. Pause/resume works during the full reveal. Only the host can skip, void, advance, or finish a song, including through the API; players have no skip or advance controls. The host can advance early during a full reveal. Leave this setting off to keep the normal reveal timer.
 
 Use **Results CSV** at the end to save standings and round-by-round answers. **Play again** keeps the group and their profiles.
 
@@ -57,7 +59,7 @@ By default, HTTP requests must use a literal IP address or `localhost`. To use a
 | Profiles | Persistent player names, hashed passcodes, MAL usernames, and eight avatar styles; returning sign-in on another device |
 | Multiplayer | Shared room, ready status, presence, late-join spectators, reconnects, up to 100 roster entries |
 | Song pools | Starter collection, union of participating players' public MAL lists, or a local media catalog |
-| Settings | 1–100 songs, OP/ED selection, MAL statuses, 5–90 second guesses, 5–60 second reveals, independent NSFW/spoiler filters, random clip starts, optional automatic advance |
+| Settings | 1–100 songs, OP/ED selection, MAL statuses, 5–90 second guesses, timed or full-video reveals, independent NSFW/spoiler filters, random clip starts, optional automatic advance |
 | Guessing | Title autocomplete, alternative English/romaji/Japanese names where available, case/accent/punctuation normalization, revisions until the deadline |
 | Scoring | Server-controlled deadlines, one point per correct anime, tied ranks, private guesses before reveal, host corrections, no-score skips |
 | Host display | Audio-only guessing, video reveal, live leaderboard, QR join link, volume, pause/resume, whiteboard mode |

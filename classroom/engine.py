@@ -17,7 +17,8 @@ LOCK = threading.RLock()
 DEFAULTS = {
     "rounds": 10, "guessSeconds": 20, "revealSeconds": 12,
     "types": ["OP", "ED"], "statuses": [1, 2], "source": "starter",
-    "autoAdvance": False, "randomStart": True, "allowNsfw": False, "allowSpoilers": False,
+    "autoAdvance": False, "randomStart": True, "fullReveal": False,
+    "allowNsfw": False, "allowSpoilers": False,
 }
 
 
@@ -35,7 +36,7 @@ def normalize(value):
 def initial():
     return {"phase": "lobby", "settings": copy.deepcopy(DEFAULTS), "players": {},
             "queue": [], "index": -1, "guesses": {}, "history": [], "titles": [],
-            "deadline": None, "paused": False, "remaining": None,
+            "deadline": None, "paused": False, "remaining": None, "revealEnded": False,
             "message": "", "loadProgress": 0, "loadId": "", "gameId": ""}
 
 
@@ -48,7 +49,9 @@ def recover_after_restart():
         if s["phase"] == "loading":
             s.update(phase="lobby", message="Server restarted. Prepare the song pool again.")
         if s["phase"] in ("guess", "reveal") and not s["paused"]:
-            s.update(paused=True, remaining=max(1, (s["deadline"] or time.time()) - time.time()), deadline=None)
+            remaining = (None if s["phase"] == "reveal" and s["settings"]["fullReveal"]
+                         else max(1, (s["deadline"] or time.time()) - time.time()))
+            s.update(paused=True, remaining=remaining, deadline=None)
         room.save(update_fields=["state"])
 
 
@@ -84,8 +87,8 @@ def reveal(s):
         player["score"] += int(correct)
     s["history"].append({"roundId": song["roundId"], "anime": song["anime"],
                          "song": song["song"], "results": results, "void": False})
-    s.update(phase="reveal", paused=False, remaining=None,
-             deadline=time.time() + s["settings"]["revealSeconds"])
+    s.update(phase="reveal", paused=False, remaining=None, revealEnded=False,
+             deadline=None if s["settings"].get("fullReveal") else time.time() + s["settings"]["revealSeconds"])
 
 
 def finish(s):
@@ -101,7 +104,7 @@ def advance(s):
     else:
         s["index"] += 1
         s.update(phase="buffering", guesses={}, deadline=None, paused=False,
-                 remaining=None, message="Waiting for the host's audio…")
+                 remaining=None, revealEnded=False, message="Waiting for the host's audio…")
 
 
 def tick(s):
@@ -109,7 +112,7 @@ def tick(s):
         return
     if s["phase"] == "guess":
         reveal(s)
-    elif s["phase"] == "reveal" and s["settings"]["autoAdvance"]:
+    elif s["phase"] == "reveal" and s["settings"]["autoAdvance"] and not s["settings"].get("fullReveal"):
         advance(s)
 
 
@@ -142,7 +145,7 @@ def validate_settings(data):
     settings["source"] = data.get("source", "starter")
     if settings["source"] not in ["starter", "mal", "local"]:
         raise GameError("Choose a valid song source.")
-    for name in ["autoAdvance", "randomStart", "allowNsfw", "allowSpoilers"]:
+    for name in ["autoAdvance", "randomStart", "fullReveal", "allowNsfw", "allowSpoilers"]:
         value = data.get(name, settings[name])
         if type(value) is not bool:
             raise GameError(f"Invalid {name} setting.")
@@ -171,10 +174,21 @@ def control(s, action, data):
         if phase != "reveal":
             raise GameError("Reveal this round first.", 409)
         advance(s)
+    elif action == "reveal-ended":
+        if (phase != "reveal" or not s["settings"].get("fullReveal")
+                or not current(s) or data.get("roundId") != current(s)["roundId"]):
+            raise GameError("This video belongs to a different reveal.", 409)
+        if s["paused"]:
+            raise GameError("Resume the reveal before finishing playback.", 409)
+        s["revealEnded"] = True
+        if s["settings"]["autoAdvance"]:
+            advance(s)
     elif action == "pause":
         if phase not in ("guess", "reveal"):
             raise GameError("No timed round is running.", 409)
-        if s["paused"]:
+        if phase == "reveal" and s["settings"].get("fullReveal"):
+            s.update(paused=not s["paused"], deadline=None, remaining=None)
+        elif s["paused"]:
             s.update(deadline=time.time() + s["remaining"], paused=False, remaining=None)
         else:
             s.update(remaining=max(0, s["deadline"] - time.time()), deadline=None, paused=True)
@@ -252,6 +266,7 @@ def public_state(s, profile_id=None, host=False):
         "roundId": song["roundId"] if song else None,
         "deadline": s["deadline"], "serverTime": now, "paused": s["paused"],
         "remaining": s["remaining"], "message": s["message"] if host else ("Preparing the song pool…" if s["phase"] == "loading" else ""), "loadProgress": s["loadProgress"],
+        "revealEnded": s["phase"] == "reveal" and s.get("revealEnded", False),
         "titles": s["titles"], "myGuess": s["guesses"].get(key, {}).get("text", ""),
         "answer": {k: song.get(k) for k in ("anime", "song", "artist", "type", "year")} if song and revealed else None,
         "history": [{"anime": h["anime"], "song": h["song"], "void": h["void"]} for h in s["history"]],

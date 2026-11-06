@@ -8,7 +8,7 @@ const palettes = [['#dca5b6','#543a55'],['#8be2c5','#294d52'],['#e3c17f','#66504
 const avatarNames = ['Sakura','Jade','Kitsune','Orbit','Ember','Wave','Luna','Forest'];
 let state = null, shell = '', authMode = 'register', selectedAvatar = 0, busyPoll = false;
 let serverOffset = 0, connected = false, mediaRound = null, beginRequested = null, stalledTimer = null;
-let cardKey = '', toastTimer;
+let cardKey = '', toastTimer, fullRevealRound = null, revealEndRequested = null;
 const drafts = new Map();
 let draftOwner = null;
 
@@ -75,7 +75,7 @@ function render() {
   $('#source-link').href = state.sourceUrl;
   const nextShell = hostView ? (state.host ? 'host-room' : 'host-auth') : (state.me ? 'player-room' : 'player-auth');
   if (nextShell !== shell) {
-    shell = nextShell; cardKey = ''; mediaRound = null;
+    shell = nextShell; cardKey = ''; mediaRound = null; fullRevealRound = null; revealEndRequested = null;
     if (shell.endsWith('auth')) renderAuth(); else renderRoomShell();
   }
   if (shell.endsWith('room')) renderRoom();
@@ -143,7 +143,7 @@ function renderHostControls() {
   if (s.phase === 'ready') { title=`${s.total} songs. The stage is set.`; hint=`${s.players.length} players in the room · ${s.players.filter(p=>p.ready).length} ready`; buttons=`<button class="button secondary" id="settings-button-inline">Edit mix</button><button class="button" data-command="start" ${!s.players.length?'disabled':''}>▶ Start quiz</button>`; }
   if (s.phase === 'buffering') { title='Loading this round’s audio.'; hint='If it cannot play, skip the song without awarding points.'; buttons='<button class="button secondary" data-command="void">Skip song →</button>'; }
   if (s.phase === 'guess') { title=s.paused?'Round paused.':'Listen. Think. Lock it in.'; hint=s.paused?'Resume when the room is ready.':'The timer closes answers and scores them automatically.'; buttons=`<button class="button secondary" data-command="pause">${s.paused?'▶ Resume':'Ⅱ Pause'}</button><button class="button secondary" data-command="void">Skip</button><button class="button" data-command="reveal">Reveal answer</button>`; }
-  if (s.phase === 'reveal') { title='Give the answer its moment.'; hint='Review close answers below before moving on.'; buttons=`<button class="button secondary" data-command="pause">${s.paused?'▶ Resume':'Ⅱ Pause'}</button><button class="button secondary" data-command="void">Void song</button><button class="button" data-command="next">${s.round===s.total?'Finish quiz':'Next song'} →</button>`; }
+  if (s.phase === 'reveal') { title=s.settings.fullReveal?'Full video reveal.':'Give the answer its moment.'; hint=s.settings.fullReveal&&s.settings.autoAdvance?'The next song starts when this video ends.':'Review close answers below before moving on.'; buttons=`<button class="button secondary" data-command="pause">${s.paused?'▶ Resume':'Ⅱ Pause'}</button><button class="button secondary" data-command="void">Void song</button><button class="button" data-command="next">${s.round===s.total?'Finish quiz':'Next song'} →</button>`; }
   if (s.phase === 'finished') { title='An encore is always a good idea.'; hint='Download the results or start a fresh session with this group.'; buttons='<a class="button secondary" href="/api/results.csv" download>↓ Results CSV</a><button class="button" data-reset>Play again ↻</button>'; }
   html('#controls', `<section class="panel host-controls"><div class="control-info"><span class="control-symbol">${s.phase==='finished'?'♛':'♫'}</span><div><strong>${title}</strong><p>${hint}</p></div></div><div class="control-actions">${buttons}</div></section>`);
 }
@@ -182,6 +182,21 @@ function updateTimer() {
 }
 
 function mediaAlert(message) { $('#media-message').textContent = message; $('#media-alert').hidden = false; }
+function restartFullReveal(video) {
+  if (state?.phase !== 'reveal' || !state.settings.fullReveal || video.readyState < 1 || fullRevealRound === state.roundId) return;
+  fullRevealRound = state.roundId;
+  $('#media-alert').hidden = true;
+  video.currentTime = 0;
+}
+async function notifyRevealEnded(video) {
+  const s = state;
+  if (!hostView || s?.phase !== 'reveal' || !s.settings.fullReveal || s.paused || s.revealEnded ||
+      fullRevealRound !== s.roundId || !video.ended || video.seeking || revealEndRequested === s.roundId) return;
+  const roundId = s.roundId;
+  revealEndRequested = roundId;
+  try { await command('reveal-ended',{roundId}); }
+  catch { if (revealEndRequested === roundId) revealEndRequested = null; }
+}
 function setupVideo() {
   const video = $('#round-video');
   video.volume = Number(localStorage.getItem('classroom-volume') || 0.7);
@@ -191,7 +206,8 @@ function setupVideo() {
     const duration = Number.isFinite(video.duration) ? video.duration : 120;
     const start = Math.min(state.startAt || 0, Math.max(0,duration-state.settings.guessSeconds-2));
     let elapsed = state.phase === 'guess' ? state.settings.guessSeconds-remaining() : state.phase==='reveal' ? state.settings.guessSeconds : 0;
-    video.currentTime = Math.max(0,Math.min(duration-0.2,start+elapsed));
+    if (state.phase === 'reveal' && state.settings.fullReveal) restartFullReveal(video);
+    else video.currentTime = Math.max(0,Math.min(duration-0.2,start+elapsed));
     if (!state.paused) tryPlay();
   });
   video.addEventListener('playing', async () => {
@@ -219,12 +235,12 @@ function setupVideo() {
     if (state?.phase === 'guess' && !state.paused) {
       mediaAlert('The clip ended before the timer. Reveal the answer or skip the song.');
       try { await command('pause'); } catch { /* reported */ }
-    }
+    } else await notifyRevealEnded(video);
   });
 }
 async function tryPlay() {
   const video = $('#round-video');
-  if (!video || !video.src || state?.paused) return;
+  if (!video || !video.src || state?.paused || (state?.phase==='reveal' && state.settings.fullReveal && state.revealEnded)) return;
   try { await video.play(); } catch { mediaAlert('Your browser needs a click to play the classroom audio.'); }
 }
 function syncVideo() {
@@ -236,11 +252,13 @@ function syncVideo() {
     return;
   }
   if (mediaRound !== s.roundId) {
-    mediaRound=s.roundId; beginRequested=null; $('#media-alert').hidden=true;
+    mediaRound=s.roundId; beginRequested=null; fullRevealRound=null; revealEndRequested=null; $('#media-alert').hidden=true;
     video.src=s.mediaUrl; video.load();
   }
-  if (s.paused) video.pause();
+  restartFullReveal(video);
+  if (s.paused || (s.phase==='reveal' && s.settings.fullReveal && s.revealEnded)) video.pause();
   else if (video.paused && !video.ended && video.readyState>=2 && $('#media-alert').hidden) tryPlay();
+  void notifyRevealEnded(video);
 }
 
 function syncContentFilters() {
@@ -248,10 +266,17 @@ function syncContentFilters() {
   const local = form.elements.source.value === 'local';
   for (const name of ['filterNsfw','filterSpoilers']) form.elements[name].disabled = local;
 }
+function syncRevealSettings() {
+  const form = $('#settings-form');
+  const full = form.elements.fullReveal.checked;
+  form.elements.revealSeconds.disabled = full;
+  $('#auto-advance-label').textContent = full ? 'Advance automatically when the revealed video ends' : 'Advance automatically after the reveal timer';
+}
 function openSettings() {
   const s = state.settings;
-  $('#settings-dialog').innerHTML = `<div class="dialog-heading"><div><span class="eyebrow">MAKE IT YOUR MIX</span><h2>Quiz settings</h2></div><button class="icon-button" data-close aria-label="Close settings">×</button></div><form id="settings-form"><div class="field"><label for="song-source">Song source</label><select id="song-source" name="source"><option value="starter" ${s.source==='starter'?'selected':''}>Starter collection · familiar favourites</option><option value="mal" ${s.source==='mal'?'selected':''}>Group’s MAL lists · public lists required</option><option value="local" ${s.source==='local'?'selected':''}>Local catalog · play without internet</option></select><p>Online sources need internet on the host. Local mode reads data/catalog.json.</p></div><div class="settings-grid"><div class="field"><label for="rounds">Number of songs</label><input id="rounds" name="rounds" type="number" min="1" max="100" value="${s.rounds}" required></div><div class="field"><label for="guess-seconds">Guess time (seconds)</label><input id="guess-seconds" name="guessSeconds" type="number" min="5" max="90" value="${s.guessSeconds}" required></div><div class="field"><label for="reveal-seconds">Reveal time (seconds)</label><input id="reveal-seconds" name="revealSeconds" type="number" min="5" max="60" value="${s.revealSeconds}" required></div></div><span class="field-label">Theme types</span><div class="check-row"><label><input type="checkbox" name="types" value="OP" ${s.types.includes('OP')?'checked':''}> Openings</label><label><input type="checkbox" name="types" value="ED" ${s.types.includes('ED')?'checked':''}> Endings</label></div><span class="field-label">MAL list statuses</span><div class="check-row">${[[1,'Watching'],[2,'Completed'],[3,'On hold'],[4,'Dropped'],[6,'Plan to watch']].map(([v,label])=>`<label><input type="checkbox" name="statuses" value="${v}" ${s.statuses.includes(v)?'checked':''}> ${label}</label>`).join('')}</div><label class="toggle-row"><input type="checkbox" name="randomStart" ${s.randomStart?'checked':''}><span>Start at a random point in each theme</span></label><label class="toggle-row"><input type="checkbox" name="autoAdvance" ${s.autoAdvance?'checked':''}><span>Advance automatically after the reveal timer<br><small class="muted">Leave off to give the host time to discuss answers.</small></span></label><span class="field-label">Content filters</span><label class="toggle-row"><input type="checkbox" name="filterNsfw" ${!s.allowNsfw?'checked':''}><span>Filter NSFW videos</span></label><label class="toggle-row"><input type="checkbox" name="filterSpoilers" ${!s.allowSpoilers?'checked':''}><span>Filter videos tagged with spoilers</span></label><p class="subtle">Content filters use AnimeThemes tags for Starter and MAL pools. One point per correct anime; no speed bonus. Each theme plays at most once per quiz.</p><p class="form-error" id="settings-error" role="alert"></p><div class="dialog-actions"><button type="button" class="button ghost" data-close>Cancel</button><button type="submit" class="button">Build song pool →</button></div></form>`;
+  $('#settings-dialog').innerHTML = `<div class="dialog-heading"><div><span class="eyebrow">MAKE IT YOUR MIX</span><h2>Quiz settings</h2></div><button class="icon-button" data-close aria-label="Close settings">×</button></div><form id="settings-form"><div class="field"><label for="song-source">Song source</label><select id="song-source" name="source"><option value="starter" ${s.source==='starter'?'selected':''}>Starter collection · familiar favourites</option><option value="mal" ${s.source==='mal'?'selected':''}>Group’s MAL lists · public lists required</option><option value="local" ${s.source==='local'?'selected':''}>Local catalog · play without internet</option></select><p>Online sources need internet on the host. Local mode reads data/catalog.json.</p></div><div class="settings-grid"><div class="field"><label for="rounds">Number of songs</label><input id="rounds" name="rounds" type="number" min="1" max="100" value="${s.rounds}" required></div><div class="field"><label for="guess-seconds">Guess time (seconds)</label><input id="guess-seconds" name="guessSeconds" type="number" min="5" max="90" value="${s.guessSeconds}" required></div><div class="field"><label for="reveal-seconds">Reveal time (seconds)</label><input id="reveal-seconds" name="revealSeconds" type="number" min="5" max="60" value="${s.revealSeconds}" required></div></div><span class="field-label">Theme types</span><div class="check-row"><label><input type="checkbox" name="types" value="OP" ${s.types.includes('OP')?'checked':''}> Openings</label><label><input type="checkbox" name="types" value="ED" ${s.types.includes('ED')?'checked':''}> Endings</label></div><span class="field-label">MAL list statuses</span><div class="check-row">${[[1,'Watching'],[2,'Completed'],[3,'On hold'],[4,'Dropped'],[6,'Plan to watch']].map(([v,label])=>`<label><input type="checkbox" name="statuses" value="${v}" ${s.statuses.includes(v)?'checked':''}> ${label}</label>`).join('')}</div><label class="toggle-row"><input type="checkbox" name="randomStart" ${s.randomStart?'checked':''}><span>Start at a random point in each theme</span></label><label class="toggle-row"><input type="checkbox" name="fullReveal" ${s.fullReveal?'checked':''}><span>Play each revealed video in full from the start<br><small class="muted">Overrides the reveal timer. The host can advance early.</small></span></label><label class="toggle-row"><input type="checkbox" name="autoAdvance" ${s.autoAdvance?'checked':''}><span><span id="auto-advance-label">Advance automatically after the reveal timer</span><br><small class="muted">Leave off to give the host time to discuss answers.</small></span></label><span class="field-label">Content filters</span><label class="toggle-row"><input type="checkbox" name="filterNsfw" ${!s.allowNsfw?'checked':''}><span>Filter NSFW videos</span></label><label class="toggle-row"><input type="checkbox" name="filterSpoilers" ${!s.allowSpoilers?'checked':''}><span>Filter videos tagged with spoilers</span></label><p class="subtle">Content filters use AnimeThemes tags for Starter and MAL pools. One point per correct anime; no speed bonus. Each theme plays at most once per quiz.</p><p class="form-error" id="settings-error" role="alert"></p><div class="dialog-actions"><button type="button" class="button ghost" data-close>Cancel</button><button type="submit" class="button">Build song pool →</button></div></form>`;
   syncContentFilters();
+  syncRevealSettings();
   $('#settings-dialog').showModal();
 }
 function openProfile() {
@@ -311,6 +336,7 @@ document.addEventListener('click', async event => {
 });
 document.addEventListener('change', event => {
   if (event.target.id==='song-source') syncContentFilters();
+  if (event.target.name==='fullReveal') syncRevealSettings();
 });
 document.addEventListener('input', event => {
   if (event.target.id==='guess-input') drafts.set(state.roundId,event.target.value);
@@ -332,7 +358,7 @@ document.addEventListener('submit', async event => {
       toast('Answer received. You can revise it until time is up.');
     }
     if (form.id==='settings-form') {
-      const settings={source:data.get('source'),rounds:Number(data.get('rounds')),guessSeconds:Number(data.get('guessSeconds')),revealSeconds:Number(data.get('revealSeconds')),types:data.getAll('types'),statuses:data.getAll('statuses').map(Number),randomStart:data.has('randomStart'),autoAdvance:data.has('autoAdvance'),allowNsfw:!form.elements.filterNsfw.checked,allowSpoilers:!form.elements.filterSpoilers.checked};
+      const settings={source:data.get('source'),rounds:Number(data.get('rounds')),guessSeconds:Number(data.get('guessSeconds')),revealSeconds:Number(form.elements.revealSeconds.value),types:data.getAll('types'),statuses:data.getAll('statuses').map(Number),randomStart:data.has('randomStart'),autoAdvance:data.has('autoAdvance'),fullReveal:data.has('fullReveal'),allowNsfw:!form.elements.filterNsfw.checked,allowSpoilers:!form.elements.filterSpoilers.checked};
       await command('prepare',{settings}); $('#settings-dialog').close();
     }
     if (form.id==='profile-form') {await playerAction('profile',{name:data.get('name'),mal:data.get('mal'),avatar:selectedAvatar});$('#profile-dialog').close();toast('Profile saved for next time.');}
