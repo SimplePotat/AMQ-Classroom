@@ -621,6 +621,56 @@ class OpeningsFallbackTests(TransactionTestCase):
         self.assertEqual([song["id"] for song in english], ["om-Opening1-shingeki"])
         fetch.reset_mock()
 
+    def test_prefer_openings_builds_the_pool_without_anime_themes(self):
+        catalog = [openings_record(f"Opening{n}-title-{t}", f"Title {t}")
+                   for t in (1, 2, 3) for n in range(1, 11)]
+
+        def respond(url, params=None):
+            if "api.animethemes.moe" in url:
+                raise AssertionError("AnimeThemes must not be consulted when openings fills the pool")
+            if "openings.moe/api/list.php" in url:
+                return catalog
+            return openings_payload(params["uid"])
+
+        with engine.room_state() as state:
+            state.update(phase="loading", loadId="openings-first")
+        with patch("classroom.library.mal_list", return_value=mal_entries(3)), patch(
+                "classroom.library.get_json", side_effect=respond), patch(
+                "classroom.metadata.requests.Session.get") as probe:
+            probe.return_value.__enter__.return_value.status_code = 206
+            library.prepare("openings-first",
+                            engine.validate_settings({"source": "mal", "types": ["OP"], "preferOpenings": True}),
+                            ["player_1"])
+        state = Room.objects.get(pk=1).state
+        self.assertEqual(state["phase"], "ready", state["message"])
+        self.assertTrue(state["queue"], str(state["queue"]))
+        self.assertTrue(all(song["id"].startswith("om-") for song in state["queue"]))
+        self.assertTrue(all(song["media"].startswith("https://openings.moe/video/") for song in state["queue"]))
+
+    def test_prefer_openings_fills_the_remainder_with_anime_themes(self):
+        catalog = [openings_record("Opening1-title-1", "Title 1")]
+
+        def respond(url, params=None):
+            if "api.animethemes.moe" in url:
+                return batch_response(url, params)
+            if "openings.moe/api/list.php" in url:
+                return catalog
+            return openings_payload(params["uid"])
+
+        with engine.room_state() as state:
+            state.update(phase="loading", loadId="openings-hybrid")
+        with patch("classroom.library.mal_list", return_value=mal_entries(2)), patch(
+                "classroom.library.get_json", side_effect=respond), patch(
+                "classroom.metadata.requests.Session.get") as probe:
+            probe.return_value.__enter__.return_value.status_code = 206
+            library.prepare("openings-hybrid",
+                            engine.validate_settings({"source": "mal", "types": ["OP"], "preferOpenings": True}),
+                            ["player_1"])
+        state = Room.objects.get(pk=1).state
+        self.assertEqual(state["phase"], "ready", state["message"])
+        prefixed = {song["id"].split("-")[0] for song in state["queue"]}
+        self.assertEqual(prefixed, {"om", "at"})
+
 
 @override_settings(ALLOWED_HOSTS=["testserver"], CLASSROOM_PREWARM_ENABLED=True)
 class PrefetchViewHooksTests(TransactionTestCase):

@@ -20,6 +20,13 @@ class FullRevealSettingsTests(SimpleTestCase):
             with self.subTest(value=value), self.assertRaisesMessage(engine.GameError, "fullReveal"):
                 engine.validate_settings({"fullReveal": value})
 
+    def test_prefer_openings_is_opt_in_and_requires_a_boolean(self):
+        self.assertIs(engine.validate_settings({})["preferOpenings"], False)
+        self.assertIs(engine.validate_settings({"preferOpenings": True})["preferOpenings"], True)
+        for value in ("false", 0, 1, None, [], {}):
+            with self.subTest(value=value), self.assertRaisesMessage(engine.GameError, "preferOpenings"):
+                engine.validate_settings({"preferOpenings": value})
+
 
 @override_settings(CLASSROOM_PREWARM_ENABLED=False)
 class FullRevealTests(TransactionTestCase):
