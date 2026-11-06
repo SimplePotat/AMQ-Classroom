@@ -421,7 +421,15 @@ def _prepare(load_id, options, usernames):
         titles = set(sorted(playable_titles)[:MAX_CANDIDATES]) | set(
             sorted(titles - playable_titles)[:max(0, MAX_CANDIDATES - len(playable_titles))])
         RANDOM.shuffle(songs)
-        queue = songs[:options["rounds"]]
+        queue, seen_shows = [], set()
+        for song in songs:
+            if len(queue) >= options["rounds"]:
+                break
+            show = engine.normalize(song["anime"])
+            if show in seen_shows:
+                continue
+            seen_shows.add(show)
+            queue.append(song)
         for i, song in enumerate(queue):
             if not song["media"].startswith("https://") or metadata.media_playable(song["media"]):
                 continue
