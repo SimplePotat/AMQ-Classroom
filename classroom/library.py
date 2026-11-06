@@ -189,7 +189,8 @@ def songs_from_anime(anime, title, options):
         if theme.get("type") not in options["types"]:
             continue
         videos = [v for entry in theme.get("animethemeentries", [])
-                  if not entry.get("nsfw") and (options["allowSpoilers"] or not entry.get("spoiler"))
+                  if (options.get("allowNsfw", False) or not entry.get("nsfw"))
+                  and (options.get("allowSpoilers", False) or not entry.get("spoiler"))
                   for v in entry.get("videos", [])
                   if urlparse(v.get("link", "")).scheme == "https"]
         if not videos:

@@ -17,7 +17,7 @@ LOCK = threading.RLock()
 DEFAULTS = {
     "rounds": 10, "guessSeconds": 20, "revealSeconds": 12,
     "types": ["OP", "ED"], "statuses": [1, 2], "source": "starter",
-    "autoAdvance": False, "randomStart": True, "allowSpoilers": False,
+    "autoAdvance": False, "randomStart": True, "allowNsfw": False, "allowSpoilers": False,
 }
 
 
@@ -44,6 +44,7 @@ def recover_after_restart():
     with LOCK, transaction.atomic():
         room, _ = Room.objects.get_or_create(pk=1, defaults={"state": initial()})
         s = room.state
+        s["settings"] = {**copy.deepcopy(DEFAULTS), **s["settings"]}
         if s["phase"] == "loading":
             s.update(phase="lobby", message="Server restarted. Prepare the song pool again.")
         if s["phase"] in ("guess", "reveal") and not s["paused"]:
@@ -141,7 +142,7 @@ def validate_settings(data):
     settings["source"] = data.get("source", "starter")
     if settings["source"] not in ["starter", "mal", "local"]:
         raise GameError("Choose a valid song source.")
-    for name in ["autoAdvance", "randomStart", "allowSpoilers"]:
+    for name in ["autoAdvance", "randomStart", "allowNsfw", "allowSpoilers"]:
         value = data.get(name, settings[name])
         if type(value) is not bool:
             raise GameError(f"Invalid {name} setting.")

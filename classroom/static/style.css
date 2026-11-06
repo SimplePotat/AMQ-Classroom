@@ -1523,6 +1523,10 @@ dialog::backdrop {
   line-height:1.6
 }
 
+.toggle-row input:disabled + span {
+  opacity:.55
+}
+
 .how-list {
   padding-left:24px
 }

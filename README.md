@@ -57,7 +57,7 @@ By default, HTTP requests must use a literal IP address or `localhost`. To use a
 | Profiles | Persistent player names, hashed passcodes, MAL usernames, and eight avatar styles; returning sign-in on another device |
 | Multiplayer | Shared room, ready status, presence, late-join spectators, reconnects, up to 100 roster entries |
 | Song pools | Starter collection, union of participating players' public MAL lists, or a local media catalog |
-| Settings | 1–100 songs, OP/ED selection, MAL statuses, 5–90 second guesses, 5–60 second reveals, random clip starts, optional automatic advance |
+| Settings | 1–100 songs, OP/ED selection, MAL statuses, 5–90 second guesses, 5–60 second reveals, independent NSFW/spoiler filters, random clip starts, optional automatic advance |
 | Guessing | Title autocomplete, alternative English/romaji/Japanese names where available, case/accent/punctuation normalization, revisions until the deadline |
 | Scoring | Server-controlled deadlines, one point per correct anime, tied ranks, private guesses before reveal, host corrections, no-score skips |
 | Host display | Audio-only guessing, video reveal, live leaderboard, QR join link, volume, pause/resume, whiteboard mode |
@@ -70,7 +70,9 @@ This implements the core AMQ-style quiz loop for a classroom. It does not recrea
 
 ### Starter collection
 
-The included catalog contains verified AnimeThemes metadata for 12 familiar series. It includes openings and endings, alternative titles, and stream URLs. **It does not bundle copyrighted music or video.** The host needs internet to stream those videos; player devices only talk to the local server. The catalog excludes entries flagged explicit, and excludes spoiler-tagged entries unless the host enables them.
+The included catalog contains verified AnimeThemes metadata for 12 familiar series. It includes openings and endings, alternative titles, and stream URLs. **It does not bundle copyrighted music or video.** The host needs internet to stream those videos; player devices only talk to the local server.
+
+Quiz settings has independent **Filter NSFW videos** and **Filter videos tagged with spoilers** toggles. Both filters are enabled by default and use AnimeThemes' [NSFW and spoiler flags on theme entries](https://github.com/AnimeThemes/animethemes-api-docs/blob/main/docs/jsonapi/reference/content/animethemeentry/show/index.md). A tagged version is excluded before the video is selected; an untagged version of the same theme can still play. Turning off a filter permits versions carrying that tag. These filters apply to both openings and endings in Starter and Group MAL pools, including cached metadata. The previous spoiler preference is preserved when upgrading.
 
 ### Group MAL lists
 
@@ -98,7 +100,7 @@ Use media you are allowed to play. Add files to **`data/media/`** and create **`
 
 The example refers to a file you supply; none is included. The `media` path is relative to `data/media/`. Supported extensions are `.webm`, `.mp4`, `.mp3`, `.wav`, `.ogg`, and `.m4a`; the browser must support the file's codec. H.264/AAC MP4 is a practical choice for cross-browser video compatibility. Local playback supports byte ranges for seeking. Audio-only files work too, with song details shown at reveal.
 
-Choose **Local catalog** in quiz settings. After installing dependencies, local mode needs no internet. Browser scripts, styling, artwork, icons, and QR generation are all served locally.
+Choose **Local catalog** in quiz settings. After installing dependencies, local mode needs no internet. Browser scripts, styling, artwork, icons, and QR generation are all served locally. AnimeThemes tag filters are disabled for local files; choose the content of your local collection directly. Your filter preferences are retained when switching sources.
 
 ## Docker
 
