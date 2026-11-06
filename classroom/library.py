@@ -267,7 +267,7 @@ def _prepare(load_id, options, usernames):
                     raise InterruptedError()
                 s.update(message=message, loadProgress=value)
 
-        warnings, skipped_users, titles = [], [], set()
+        warnings, skipped_users, titles, load_errors = [], [], set(), []
         pool_limited = False
         if options["source"] == "local":
             songs = [song for song in local_catalog() if song["type"] in options["types"]]
@@ -314,11 +314,16 @@ def _prepare(load_id, options, usernames):
                 except GameError as exc:
                     if "rate limiting" in str(exc):
                         raise
+                    LOG.warning("Theme lookup failed for %d titles: %s", len(batch), exc)
+                    if not load_errors:
+                        load_errors.append(str(exc))
                     warnings.extend(title for _, title in batch)
                 if len(songs) >= max(30, options["rounds"] * 3):
                     break
         songs = list({song["id"]: song for song in songs}.values())
         if not songs:
+            if load_errors:
+                raise GameError(f"No songs could be loaded from {len(warnings)} titles. {load_errors[0]}")
             raise GameError("No playable songs matched these settings. Try another source or enable both OP and ED.")
         # Keep answers from the playable pool in autocomplete even if a large
         # collection reaches the title cap.
