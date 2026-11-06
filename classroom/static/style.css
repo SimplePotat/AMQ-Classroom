@@ -1129,13 +1129,14 @@ footer b {
 
 .auth-hero {
   position:relative;
-  min-height:570px;
+  min-height:320px;
   border-radius:20px;
   background:#1c3449 url('/assets/scene.svg') 58% center/cover;
   overflow:hidden;
   display:flex;
   flex-direction:column;
-  justify-content:space-between;
+  justify-content:center;
+  align-items:center;
   padding:35px;
   border:1px solid #385265
 }
@@ -1172,10 +1173,10 @@ footer b {
 
 .auth-kicker {
   display:flex;
-  justify-content:space-between;
+  justify-content:center;
   align-items:center;
-  font-size:9px;
-  letter-spacing:2px;
+  font-size:16px;
+  letter-spacing:4px;
   color:#c9dedd
 }
 
@@ -1770,7 +1771,7 @@ dialog::backdrop {
   }
   .auth-hero {
     padding:25px;
-    min-height:560px
+    min-height:300px
   }
   .auth-hero h1 {
     font-size:36px
@@ -1908,7 +1909,7 @@ dialog::backdrop {
     font-size:8px
   }
   .auth-kicker {
-    font-size:8px
+    font-size:15px
   }
   .auth-card {
     max-width:none;
