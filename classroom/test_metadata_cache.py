@@ -553,6 +553,68 @@ class OpeningsFallbackTests(TransactionTestCase):
             self.assertEqual(state["phase"], "lobby")
             self.assertIn("No songs could be loaded from", state["message"])
 
+    def test_dead_media_is_swapped_to_openings(self):
+        catalog = [openings_record("Opening1-title-1", "Title 1")]
+
+        def respond(url, params=None):
+            if "api.animethemes.moe" in url:
+                return batch_response(url, params)
+            if "openings.moe/api/list.php" in url:
+                return catalog
+            return openings_payload(params["uid"])
+
+        with engine.room_state() as state:
+            state.update(phase="loading", loadId="dead-media")
+        with patch("classroom.library.mal_list", return_value=mal_entries(1)), patch(
+                "classroom.library.get_json", side_effect=respond), patch(
+                "classroom.metadata.requests.Session.get") as probe:
+            probe.return_value.__enter__.return_value.status_code = 502
+            library.prepare("dead-media", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+        state = Room.objects.get(pk=1).state
+        self.assertEqual(state["phase"], "ready", state["message"])
+        self.assertTrue(all(song["id"].startswith("om-") for song in state["queue"]), state["queue"])
+        self.assertTrue(all(song["media"].startswith("https://openings.moe/video/") for song in state["queue"]))
+
+    def test_healthy_media_is_never_swapped(self):
+        catalog = [openings_record("Opening1-title-1", "Title 1")]
+        fallback_touches = []
+
+        def respond(url, params=None):
+            if "openings.moe" in url:
+                fallback_touches.append(url)
+                return catalog if "list.php" in url else openings_payload(params["uid"])
+            return batch_response(url, params)
+
+        with engine.room_state() as state:
+            state.update(phase="loading", loadId="healthy-media")
+        with patch("classroom.library.mal_list", return_value=mal_entries(1)), patch(
+                "classroom.library.get_json", side_effect=respond), patch(
+                "classroom.metadata.requests.Session.get") as probe:
+            probe.return_value.__enter__.return_value.status_code = 206
+            library.prepare("healthy-media", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+        state = Room.objects.get(pk=1).state
+        self.assertEqual(state["phase"], "ready", state["message"])
+        self.assertTrue(any(song["id"].startswith("at-") for song in state["queue"]))
+        self.assertEqual(fallback_touches, [])
+
+    def test_parenthesized_titles_match_native_and_english_names(self):
+        catalog = [openings_record("Opening1-shingeki", "Shingeki no Kyojin (Attack on Titan)")]
+        options = {"types": ["OP"], "allowNsfw": False, "allowSpoilers": False}
+
+        def respond(url, params=None):
+            if "api.animethemes.moe" in url:
+                raise engine.GameError("The music provider could not be reached. Check the host's internet connection or use a local catalog.")
+            if "openings.moe/api/list.php" in url:
+                return catalog
+            return openings_payload(params["uid"])
+
+        with patch("classroom.library.get_json", side_effect=respond) as fetch:
+            native = library.songs_from_openings([(1, "Shingeki no Kyojin")], options, 1)
+            english = library.songs_from_openings([(1, "Attack on Titan")], options, 1)
+        self.assertEqual([song["id"] for song in native], ["om-Opening1-shingeki"])
+        self.assertEqual([song["id"] for song in english], ["om-Opening1-shingeki"])
+        fetch.reset_mock()
+
 
 @override_settings(ALLOWED_HOSTS=["testserver"], CLASSROOM_PREWARM_ENABLED=True)
 class PrefetchViewHooksTests(TransactionTestCase):
