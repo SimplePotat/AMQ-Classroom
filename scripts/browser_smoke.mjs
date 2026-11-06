@@ -90,6 +90,9 @@ try {
   assert.equal(await spoilerFilter.isChecked(),false);
   await spoilerFilter.check();
   await nsfwFilter.uncheck();
+  const openingsFirst=host.getByLabel('Build pools with openings.moe first',{exact:false});
+  assert.equal(await openingsFirst.isChecked(),false,'Openings-first should be opt-in');
+  await openingsFirst.check();
   await host.getByLabel('Song source').selectOption('local');
   assert.equal(await nsfwFilter.isDisabled(),true);
   assert.equal(await spoilerFilter.isDisabled(),true);
@@ -97,10 +100,13 @@ try {
   await host.getByLabel('Guess time (seconds)').fill('12');
   await host.getByLabel('Start at a random point').uncheck();
   await host.getByRole('button',{name:'Build song pool'}).click();
-  await waitState(host,s=>s.phase==='ready');
+  const localPool=await waitState(host,s=>s.phase==='ready');
+  assert.equal(localPool.settings.preferOpenings,true,'Openings-first preference was not saved');
   await host.getByRole('button',{name:'Quiz settings',exact:false}).click();
   assert.equal(await nsfwFilter.isChecked(),false,'NSFW preference changed when disabled in local mode');
   assert.equal(await spoilerFilter.isChecked(),true,'Spoiler preference was not retained');
+  assert.equal(await openingsFirst.isChecked(),true,'Openings-first preference was not retained');
+  await openingsFirst.uncheck();
   await host.getByLabel('Song source').selectOption('mal');
   assert.equal(await nsfwFilter.isEnabled(),true);
   assert.equal(await spoilerFilter.isEnabled(),true);

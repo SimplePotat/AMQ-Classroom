@@ -384,7 +384,11 @@ def _prepare(load_id, options, usernames):
             RANDOM.shuffle(candidates)
             candidates = candidates[:MAX_THEME_CANDIDATES]
             songs = []
+            if options.get("preferOpenings"):
+                songs.extend(songs_from_openings(candidates, options, max(30, options["rounds"] * 3)))
             for i in range(0, len(candidates), ANIME_BATCH_SIZE):
+                if len(songs) >= max(30, options["rounds"] * 3):
+                    break
                 batch = candidates[i:i + ANIME_BATCH_SIZE]
                 progress(f"Finding themes · {batch[0][1]}", min(95, 15 + round(80 * i / len(candidates))))
                 try:
@@ -405,8 +409,6 @@ def _prepare(load_id, options, usernames):
                         LOG.warning("Fallback lookup failed: %s", fallback_exc)
                         if not load_errors:
                             load_errors.append(str(fallback_exc))
-                if len(songs) >= max(30, options["rounds"] * 3):
-                    break
         songs = list({song["id"]: song for song in songs}.values())
         if not songs:
             if load_errors:
