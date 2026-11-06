@@ -325,6 +325,18 @@ class LobbyCacheTests(TransactionTestCase):
             fetch.assert_not_called()
         self.assertEqual(Room.objects.get(pk=1).state["phase"], "ready")
 
+    def test_failed_lookups_report_the_provider_error_when_the_pool_ends_up_empty(self):
+        with engine.room_state() as state:
+            state.update(phase="loading", loadId="offline-prep")
+        with patch("classroom.library.mal_list", return_value=mal_entries(5)), patch(
+                "classroom.library.get_json",
+                side_effect=engine.GameError("The music provider could not be reached. Check the host's internet connection or use a local catalog.")):
+            library.prepare("offline-prep", engine.validate_settings({"source": "mal"}), ["player_1"])
+        with engine.room_state() as state:
+            self.assertEqual(state["phase"], "lobby")
+            self.assertIn("No songs could be loaded from 5 titles", state["message"])
+            self.assertIn("The music provider could not be reached", state["message"])
+
     def test_warming_indexes_every_list_entry_including_unselected_statuses(self):
         with patch("classroom.library.mal_list", return_value=mal_entries(100) + [
             {"anime_id": 1000, "anime_title": "Included", "status": 6},
