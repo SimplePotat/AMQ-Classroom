@@ -899,21 +899,14 @@ footer b {
   transition:width .25s linear
 }
 
-.stage.revealed .stage-top,.stage.revealed .stage-bottom {
+.stage.revealed .stage-bottom {
   background:#0b1225b8;
   padding:8px 12px;
-  border-radius:6px
-}
-
-.stage.revealed .stage-bottom {
+  border-radius:6px;
   bottom:12px
 }
 
 .stage.revealed .stage-top {
-  top:12px
-}
-
-.stage.revealed .stage-number {
   display:none
 }
 
