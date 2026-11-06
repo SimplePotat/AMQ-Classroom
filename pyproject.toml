@@ -11,7 +11,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "anime_quiz"
 version = "1.0"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 authors = [{name = "Przemysław Buczkowski", email = "prem@prem.moe"}]
 description = "Anime Themes Quiz for people with taste."
 classifiers = [
@@ -29,12 +29,12 @@ readme = "README.md"
 dependencies = [
     "animelyrics==0.1.0",
     "bugsnag~=4.7.1",
-    "Django~=5.2.18",
+    "Django~=5.2.19",
     "django-redis~=5.4.0",
     "django-structlog~=11.0.0",
     "first==2.0.2",
     "redis[hiredis]~=5.2.0",
-    "requests~=2.32.3",
+    "requests>=2.33.0,<3",
     "structlog~=26.1.0",
     "uWSGI~=2.0.28",
 ]

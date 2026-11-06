@@ -242,7 +242,7 @@ def public_state(s, profile_id=None, host=False):
     for i, (pid, p) in enumerate(ranked):
         if p["score"] != prior:
             rank, prior = i + 1, p["score"]
-        players.append({"id": pid, "name": p["name"], "mal": p["mal"], "avatar": p["avatar"],
+        players.append({"id": pid, "name": p["name"], "avatar": p["avatar"],
             "score": p["score"], "rank": rank, "ready": p["ready"], "spectator": p.get("spectator", False),
             "online": now - p["lastSeen"] < 35, "submitted": pid in s["guesses"],
             "result": latest.get("results", {}).get(pid)})
@@ -250,7 +250,7 @@ def public_state(s, profile_id=None, host=False):
         "round": s["index"] + 1, "total": len(s["queue"]),
         "roundId": song["roundId"] if song else None,
         "deadline": s["deadline"], "serverTime": now, "paused": s["paused"],
-        "remaining": s["remaining"], "message": s["message"], "loadProgress": s["loadProgress"],
+        "remaining": s["remaining"], "message": s["message"] if host else ("Preparing the song pool…" if s["phase"] == "loading" else ""), "loadProgress": s["loadProgress"],
         "titles": s["titles"], "myGuess": s["guesses"].get(key, {}).get("text", ""),
         "answer": {k: song.get(k) for k in ("anime", "song", "artist", "type", "year")} if song and revealed else None,
         "history": [{"anime": h["anime"], "song": h["song"], "void": h["void"]} for h in s["history"]],

@@ -1,7 +1,8 @@
 FROM python:3.13-slim
 WORKDIR /app
 COPY requirements-classroom.txt .
-RUN pip install --no-cache-dir -r requirements-classroom.txt \
+RUN python -m pip install --no-cache-dir --upgrade "pip>=26.2,<27" \
+    && pip install --no-cache-dir -r requirements-classroom.txt \
     && useradd --uid 10001 --create-home quiz \
     && mkdir /data && chown quiz:quiz /data
 COPY classroom ./classroom

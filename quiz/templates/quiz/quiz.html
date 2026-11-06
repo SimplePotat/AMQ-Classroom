@@ -21,7 +21,7 @@ along with Anime Quiz.  If not, see <https://www.gnu.org/licenses/>.
 
 {% if send_just_player and alert %}
 <div class="alert alert-primary">
-    {{ alert }}
+    {{ alert|linebreaksbr }}
 </div>
 {% endif %}
 
@@ -53,7 +53,7 @@ along with Anime Quiz.  If not, see <https://www.gnu.org/licenses/>.
 
     {% if alert %}
     <div class="alert alert-primary">
-        {{ alert }}
+        {{ alert|linebreaksbr }}
     </div>
     {% endif %}
 
@@ -152,7 +152,7 @@ along with Anime Quiz.  If not, see <https://www.gnu.org/licenses/>.
 {% endif %}
             <div class="tab-pane fade" id="lyrics" role="tabpanel" aria-labelledby="lyrics-tab">
                 <div id="lyrics-text" style="display: none;">
-                    {{ lyrics }}
+                    {{ lyrics|linebreaksbr }}
                 </div>
                 <div id="lyrics-hidden">
                     Hidden!

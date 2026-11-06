@@ -10,6 +10,7 @@ let state = null, shell = '', authMode = 'register', selectedAvatar = 0, busyPol
 let serverOffset = 0, connected = false, mediaRound = null, beginRequested = null, stalledTimer = null;
 let cardKey = '', toastTimer;
 const drafts = new Map();
+let draftOwner = null;
 
 function avatar(index, cls = '') {
   const [light, dark] = palettes[index % palettes.length] || palettes[0];
@@ -62,6 +63,13 @@ async function poll() {
 }
 
 function render() {
+  const nextDraftOwner = state.me?.id ?? null;
+  if (nextDraftOwner !== draftOwner) {
+    // Shared devices must never carry an unsent answer into another account.
+    drafts.clear();
+    draftOwner = nextDraftOwner;
+    cardKey = '';
+  }
   $('#mode-link').href = hostView ? '/' : '/host';
   $('#mode-link').textContent = hostView ? 'Player portal' : 'Host desk';
   $('#source-link').href = state.sourceUrl;
@@ -288,6 +296,8 @@ document.addEventListener('click', async event => {
     if (button.id==='mute-button') {const v=$('#round-video');v.muted=!v.muted;button.textContent=v.muted?'♫ Muted':'♫ Sound on';button.setAttribute('aria-label',v.muted?'Unmute audio':'Mute audio');}
     if (['host-logout','player-logout'].includes(button.id)) {
       await request('/api/logout',{role:button.id==='host-logout'?'host':'player'});
+      drafts.clear();
+      draftOwner = null;
       document.querySelectorAll('dialog[open]').forEach(d=>d.close());
       await poll();
     }

@@ -38,7 +38,9 @@ def main():
     print(f"\n  ANIME QUIZ / CLASSROOM\n  Players:  {url}\n  Host:     http://localhost:{args.port}/host\n  Host key: {settings.HOST_KEY}\n  Data:     {settings.DATA_DIR}\n", flush=True)
     print("  Keep this terminal open. Press Ctrl+C to stop.\n", flush=True)
     serve(get_wsgi_application(), host=args.host, port=args.port, threads=16,
-          max_request_body_size=1024 * 1024, clear_untrusted_proxy_headers=True)
+          max_request_body_size=settings.DATA_UPLOAD_MAX_MEMORY_SIZE,
+          max_request_header_size=16 * 1024, channel_timeout=30,
+          clear_untrusted_proxy_headers=True)
 
 
 if __name__ == "__main__":

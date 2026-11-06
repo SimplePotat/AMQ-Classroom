@@ -17,6 +17,10 @@ from .models import CachedResource
 LOG = logging.getLogger(__name__)
 RANDOM = random.SystemRandom()
 API = "https://api.animethemes.moe"
+JSON_HOSTS = frozenset({"api.animethemes.moe", "myanimelist.net"})
+MAX_JSON_BYTES = 4 * 1024 * 1024
+MAX_MAL_ENTRIES = 20_000
+MAX_CANDIDATES = 20_000
 INCLUDE = "animethemes.animethemeentries.videos,animethemes.song.artists,animesynonyms,resources"
 STARTER = [
     (1, "Cowboy Bebop"), (1535, "Death Note"), (5114, "Fullmetal Alchemist: Brotherhood"),
@@ -36,13 +40,33 @@ def cached(key, seconds, fetch):
 
 
 def get_json(url, params=None):
+    # Only the two metadata providers are contacted by the server. In particular,
+    # a provider redirect must not turn this into a request to a LAN service.
     try:
-        response = requests.get(url, params=params, timeout=(5, 20),
-            headers={"User-Agent": "AnimeQuizClassroom/1.0 (+https://github.com/SimplePotat/anime-quiz-classroom)"})
-        if response.status_code == 429:
-            raise GameError("The music provider is rate limiting requests. Wait a minute and try again.")
-        response.raise_for_status()
-        return response.json()
+        target = urlparse(url)
+        allowed = (target.scheme == "https" and target.hostname in JSON_HOSTS
+                   and target.port in (None, 443) and not target.username and not target.password)
+    except ValueError:
+        allowed = False
+    if not allowed:
+        raise GameError("The metadata provider address is not allowed.")
+    try:
+        with requests.get(url, params=params, timeout=(5, 20), stream=True, allow_redirects=False,
+                headers={"User-Agent": "AnimeQuizClassroom/1.0 (+https://github.com/SimplePotat/anime-quiz-classroom)"}) as response:
+            if response.status_code == 429:
+                raise GameError("The music provider is rate limiting requests. Wait a minute and try again.")
+            if 300 <= response.status_code < 400:
+                raise GameError("The metadata provider returned an unexpected redirect.")
+            response.raise_for_status()
+            length = response.headers.get("Content-Length", "")
+            if length.isdigit() and int(length) > MAX_JSON_BYTES:
+                raise GameError("The metadata provider response is too large.")
+            body = bytearray()
+            for chunk in response.iter_content(chunk_size=65536):
+                if len(body) + len(chunk) > MAX_JSON_BYTES:
+                    raise GameError("The metadata provider response is too large.")
+                body.extend(chunk)
+            return json.loads(body)
     except (requests.RequestException, ValueError) as exc:
         raise GameError("The music provider could not be reached. Check the host's internet connection or use a local catalog.") from exc
 
@@ -50,12 +74,21 @@ def get_json(url, params=None):
 def mal_list(username):
     def fetch():
         entries = []
-        for offset in range(0, 50001, 300):
+        for offset in range(0, MAX_MAL_ENTRIES + 1, 300):
             data = get_json(f"https://myanimelist.net/animelist/{quote(username, safe='')}/load.json",
                             {"status": 7, "offset": offset})
             if not isinstance(data, list):
                 raise GameError(f"MAL list for {username} is private, missing, or temporarily unavailable.")
-            entries.extend(data)
+            if len(data) > 300 or len(entries) + len(data) > MAX_MAL_ENTRIES:
+                raise GameError(f"MAL list for {username} is too large to import.")
+            # Do not persist unrelated profile metadata or unbounded fields
+            # from each page; the quiz only needs these three scalar values.
+            for entry in data:
+                entry = entry if isinstance(entry, dict) else {}
+                mal_id, title, status = entry.get("anime_id"), entry.get("anime_title"), entry.get("status")
+                entries.append({"anime_id": mal_id if type(mal_id) is int and mal_id > 0 else None,
+                                "anime_title": title if isinstance(title, str) and 1 <= len(title) <= 500 else None,
+                                "status": status if type(status) is int else None})
             if len(data) < 300:
                 return entries
         raise GameError(f"MAL list for {username} is too large to import.")
@@ -135,7 +168,8 @@ def prepare(load_id, options, usernames):
                     raise InterruptedError()
                 s.update(message=message, loadProgress=value)
 
-        warnings, titles = [], set()
+        warnings, skipped_users, titles = [], [], set()
+        pool_limited = False
         if options["source"] == "local":
             songs = [song for song in local_catalog() if song["type"] in options["types"]]
         elif options["source"] == "starter":
@@ -148,13 +182,30 @@ def prepare(load_id, options, usernames):
             anime_map = {}
             for i, username in enumerate(usernames):
                 progress(f"Reading {username}'s MAL list…", round(15 * i / len(usernames)))
-                entries = mal_list(username)
+                try:
+                    entries = mal_list(username)
+                except GameError as exc:
+                    if "rate limiting" in str(exc):
+                        raise
+                    skipped_users.append(username)
+                    continue
                 for entry in entries:
-                    if entry.get("status") in options["statuses"]:
-                        anime_map[entry["anime_id"]] = entry["anime_title"]
-                        titles.add(entry["anime_title"])
+                    if not isinstance(entry, dict) or entry.get("status") not in options["statuses"]:
+                        continue
+                    mal_id, title = entry.get("anime_id"), entry.get("anime_title")
+                    if (not isinstance(mal_id, int) or isinstance(mal_id, bool) or mal_id <= 0
+                            or not isinstance(title, str) or not 1 <= len(title) <= 500):
+                        continue
+                    if mal_id not in anime_map and len(anime_map) >= MAX_CANDIDATES:
+                        pool_limited = True
+                        continue
+                    anime_map[mal_id] = title
             if not anime_map:
-                raise GameError("No anime matched the selected MAL list statuses. Check the players' public lists.")
+                message = "No anime matched the selected MAL list statuses. Check the players' public lists."
+                if skipped_users:
+                    message += " Lists could not be imported for: " + ", ".join(skipped_users) + "."
+                raise GameError(message)
+            titles.update(anime_map.values())
             candidates = list(anime_map.items())
             RANDOM.shuffle(candidates)
             songs = []
@@ -172,7 +223,12 @@ def prepare(load_id, options, usernames):
         songs = list({song["id"]: song for song in songs}.values())
         if not songs:
             raise GameError("No playable songs matched these settings. Try another source or enable both OP and ED.")
-        titles.update(title for song in songs for title in [song["anime"], *song.get("aliases", [])] if title)
+        # Keep answers from the playable pool in autocomplete even if a large
+        # collection reaches the title cap.
+        playable_titles = {title for song in songs for title in [song["anime"], *song.get("aliases", [])]
+                           if isinstance(title, str) and 1 <= len(title) <= 500}
+        titles = set(sorted(playable_titles)[:MAX_CANDIDATES]) | set(
+            sorted(titles - playable_titles)[:max(0, MAX_CANDIDATES - len(playable_titles))])
         RANDOM.shuffle(songs)
         queue = songs[:options["rounds"]]
         for song in queue:
@@ -185,6 +241,10 @@ def prepare(load_id, options, usernames):
                     message += " Fewer songs matched than requested; no songs will repeat."
                 if warnings:
                     message += f" {len(warnings)} titles could not be loaded."
+                if skipped_users:
+                    message += " Lists skipped (private, missing, or unavailable): " + ", ".join(skipped_users) + "."
+                if pool_limited:
+                    message += f" The combined pool was limited to {MAX_CANDIDATES:,} anime."
                 s.update(phase="ready", queue=queue, index=-1, titles=sorted(titles),
                          loadProgress=100, message=message, guesses={}, history=[])
     except InterruptedError:

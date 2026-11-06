@@ -16,11 +16,12 @@
 #      along with Anime Quiz.  If not, see <https://www.gnu.org/licenses/>.
 import logging
 import random as random_module
+import re
 
 from django.core.cache import cache
 from django.http import HttpResponse
 from django.shortcuts import render
-from django.utils.safestring import mark_safe
+from django.utils.html import format_html
 from django.views.generic.base import View
 
 from .mal import get_raw_mal, filter_mal, MAL_OPTIONS, MyanimelistException
@@ -254,12 +255,12 @@ class UserThemesView(View):
             except TaskStatus:
                 enqueued_users.append(user)
             except MyanimelistException:
-                alert += f"User {user} does not exist. <br />"
+                alert += f"User {user} does not exist.\n"
             else:
                 if user_themes:
                     available_users.append((user, user_themes))
                 else:
-                    alert += f"User {user} has an empty list. <br />"
+                    alert += f"User {user} has an empty list.\n"
 
         request._quiz_context["available_users"] = [u for u, _ in available_users]
         request._quiz_context["enqueued_users"] = enqueued_users
@@ -269,7 +270,7 @@ class UserThemesView(View):
             alert += (
                 f"User{'s' if plural else ''} "
                 f"{', '.join(enqueued_users)} "
-                f"{'have' if plural else 'has'} been enqueued.<br />"
+                f"{'have' if plural else 'has'} been enqueued.\n"
             )
 
         # Try each user's themes with filters applied
@@ -280,7 +281,7 @@ class UserThemesView(View):
             if filtered:
                 themes = filtered
             else:
-                alert += f"After filtering, user {user} has an empty list. <br />"
+                alert += f"After filtering, user {user} has an empty list.\n"
 
         # Fallback to przemub's list
         if not themes:
@@ -289,9 +290,10 @@ class UserThemesView(View):
                 przemub_themes = self._get_user_themes("przemub", statuses)
             except TaskStatus as status:
                 return HttpResponse(
-                    "quiz.moe is temporarily unavailable. "
-                    "Come back in a minute!<br>Message:<br> "
-                    + status.args[0],
+                    format_html(
+                        "quiz.moe is temporarily unavailable. "
+                        "Come back in a minute!<br>Message:<br> {}", status.args[0]
+                    ),
                     status=503,
                 )
             themes = self._apply_themes_filters(
@@ -324,9 +326,11 @@ class UserThemesView(View):
             "nsfw": nsfw,
             "karaoke": karaoke,
             "statuses": statuses,
-            "lyrics": mark_safe(lyrics),
+            # Older cache entries contain <br> markup. Convert only those breaks;
+            # every other provider-supplied character remains escaped by Django.
+            "lyrics": re.sub(r"<br\s*/?>", "\n", lyrics, flags=re.IGNORECASE),
             "all_statuses": self.ALL_STATUSES,
-            "alert": mark_safe(alert),
+            "alert": alert,
             "send_just_player": send_just_player,
         }
 

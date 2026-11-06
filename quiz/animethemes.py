@@ -108,7 +108,10 @@ GET_PARAM = Union[str, int, float, List[Union[str, int, float]]]
 def _query_api(path: str, params: Dict[str, GET_PARAM]) -> dict:
     if path[0] != "/":
         path = "/" + path
-    r = SESSION.get(BASE + path, params=params)
+    try:
+        r = SESSION.get(BASE + path, params=params, timeout=(5, 20), allow_redirects=False)
+    except requests.RequestException as exc:
+        raise AnimeThemesDown(503) from exc
 
     if r.status_code == 429:
         raise AnimeThemesThrottled(int(r.headers.get("Retry-After", 30)))

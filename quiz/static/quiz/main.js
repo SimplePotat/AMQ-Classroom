@@ -304,7 +304,10 @@ function removePlayer (element) {
 
 function clearPlayer () {
   localStorage.removeItem('results')
-  document.getElementById('results-div').innerHTML = document.getElementById('results-template').innerHTML
+  localStorage.removeItem('results-v2')
+  document.getElementById('results-div').replaceChildren(
+    document.getElementById('results-template').content.cloneNode(true)
+  )
 }
 
 function addPoint (element) {
@@ -321,25 +324,44 @@ function removePoint (element) {
 
 function initResultsSaving () {
   const results = document.getElementById('results-div')
+  const template = document.getElementById('results-template')
+  // Old versions persisted executable HTML. Never parse those saved boards.
+  localStorage.removeItem('results')
+  results.replaceChildren(template.content.cloneNode(true))
 
-  if (localStorage.getItem('results') !== null) {
-    results.innerHTML = localStorage.getItem('results')
-  } else {
-    results.innerHTML = document.getElementById('results-template').innerHTML
-    localStorage.setItem('results', results.innerHTML)
-  }
-
-  const observer = new MutationObserver(function (mutationsList, observer) {
-    localStorage.setItem('results', results.innerHTML)
-  })
-  observer.observe(results, { attributes: true, childList: true, subtree: true, characterData: true })
-
-  // Update field's value for saving
-  for (const playerField of document.getElementsByClassName('form-control user-field player-field')) {
-    playerField.onchange = function (value) {
-      playerField.outerHTML = playerField.outerHTML.replace(/value=".*"/, 'value="' + playerField.value + '"')
+  try {
+    const saved = localStorage.getItem('results-v2')
+    const players = saved && saved.length <= 65536 ? JSON.parse(saved) : null
+    if (Array.isArray(players) && players.length <= 100 && players.every(player =>
+      player && typeof player.name === 'string' && player.name.length <= 100 &&
+      Number.isSafeInteger(player.points) && player.points >= 0 && player.points <= 1000000000
+    )) {
+      const board = document.getElementById('results')
+      board.replaceChildren()
+      for (const player of players) {
+        const row = template.content.querySelector('li').cloneNode(true)
+        row.querySelector('.player-field').value = player.name
+        row.querySelector('.points').textContent = String(player.points)
+        board.appendChild(row)
+      }
     }
+  } catch (error) {
+    // A malformed saved board should not prevent the page from opening.
+    localStorage.removeItem('results-v2')
   }
+
+  function saveResults () {
+    const players = [...results.querySelectorAll('li')].slice(0, 100).map(row => ({
+      name: row.querySelector('.player-field').value.slice(0, 100),
+      points: Math.min(1000000000, Math.max(0, Number(row.querySelector('.points').textContent) || 0))
+    }))
+    localStorage.setItem('results-v2', JSON.stringify(players))
+  }
+  const observer = new MutationObserver(saveResults)
+  observer.observe(results, { attributes: true, childList: true, subtree: true, characterData: true })
+  // Event delegation also saves players added after the page loads.
+  results.addEventListener('input', saveResults)
+  saveResults()
 }
 
 function initColorMode () {

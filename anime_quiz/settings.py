@@ -38,12 +38,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/3.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "&s50#5cro1wnl#wnk-bf)=ss((&m5oc(dt6nnxcydu#39+=r9("
+import secrets
+SECRET_KEY = os.environ.get("QUIZ_SECRET_KEY") or secrets.token_urlsafe(48)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("QUIZ_DEBUG", "0") == "1"
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = os.environ.get("QUIZ_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]").split(",")
 
 from anime_quiz.logging_config import build_logging, configure_structlog
 

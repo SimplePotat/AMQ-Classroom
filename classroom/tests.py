@@ -156,7 +156,9 @@ class ClassroomTests(TransactionTestCase):
         self.assertEqual(self.state()["phase"], "finished")
         self.assertEqual(GameResult.objects.count(), 1)
         self.assertEqual(GameResult.objects.get().result["players"][self.alice_id]["score"], 1)
-        self.assertEqual(Client().get("/api/state").json()["phase"], "finished")
+        returning = Client()
+        self.post(returning, "/api/auth", {"action": "login", "name": "Alice", "password": "test-passcode"})
+        self.assertEqual(self.state(returning)["phase"], "finished")
 
     def test_concurrent_clock_ticks_finalize_game_once(self):
         self.start(1)

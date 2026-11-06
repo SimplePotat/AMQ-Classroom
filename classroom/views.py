@@ -15,13 +15,15 @@ import qrcode.image.svg
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.db import IntegrityError
+from django.middleware.csrf import rotate_token
+from .security import is_host, grant_host
 from django.http import FileResponse, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET
 
 from . import engine, library
-from .models import Profile
+from .models import Profile, GameResult
 
 ATTEMPTS = defaultdict(deque)
 AUTH_LOCK = threading.Lock()
@@ -37,9 +39,13 @@ def api(fn):
             result["Cache-Control"] = "no-store"
             return result
         except engine.GameError as exc:
-            return JsonResponse({"error": str(exc)}, status=exc.status)
+            result = JsonResponse({"error": str(exc)}, status=exc.status)
+            result["Cache-Control"] = "no-store"
+            return result
         except (ValueError, TypeError, json.JSONDecodeError):
-            return JsonResponse({"error": "Invalid request data."}, status=400)
+            result = JsonResponse({"error": "Invalid request data."}, status=400)
+            result["Cache-Control"] = "no-store"
+            return result
     return wrapped
 
 
@@ -55,7 +61,7 @@ def body(request):
 
 
 def require_host(request):
-    if not request.session.get("host"):
+    if not is_host(request):
         raise engine.GameError("Sign in with the host key first.", 403)
 
 
@@ -70,7 +76,7 @@ def require_profile(request):
     return profile
 
 
-def throttle(request, kind):
+def throttle(request, kind, limit=30, window=300):
     now = time.time()
     key = (kind, request.META.get("REMOTE_ADDR", "unknown"))
     with AUTH_LOCK:
@@ -78,10 +84,10 @@ def throttle(request, kind):
             if not ATTEMPTS[stale] or ATTEMPTS[stale][-1] < now - 300:
                 del ATTEMPTS[stale]
         queue = ATTEMPTS[key]
-        while queue and queue[0] < now - 300:
+        while queue and queue[0] < now - window:
             queue.popleft()
-        if len(queue) >= 30:
-            raise engine.GameError("Too many attempts. Please wait five minutes.", 429)
+        if len(queue) >= limit:
+            raise engine.GameError("Too many attempts. Please wait before trying again.", 429)
         queue.append(now)
 
 
@@ -89,7 +95,7 @@ def validate_profile(data):
     name = data.get("name", "")
     mal = data.get("mal", "")
     avatar = data.get("avatar", 0)
-    if not isinstance(name, str) or not 2 <= len(name.strip()) <= 24 or any(ord(c) < 32 for c in name):
+    if not isinstance(name, str) or len(name) > 100 or not 2 <= len(name.strip()) <= 24 or any(ord(c) < 32 for c in name):
         raise engine.GameError("Choose a player name with 2–24 characters.")
     name = name.strip()
     if not engine.normalize(name):
@@ -126,7 +132,9 @@ def state(request):
     if request.method != "GET":
         raise engine.GameError("Use GET.", 405)
     profile = profile_for(request)
-    host = bool(request.session.get("host"))
+    host = is_host(request)
+    if not profile and not host:
+        return {"host": False, "me": None, "joinUrl": join_url(request), "sourceUrl": settings.SOURCE_URL}
     with engine.room_state() as s:
         if profile and str(profile.pk) in s["players"]:
             player = s["players"][str(profile.pk)]
@@ -145,10 +153,13 @@ def auth(request):
     throttle(request, "auth")
     if data.get("action") == "host":
         key = data.get("key", "")
-        if not isinstance(key, str) or not secrets.compare_digest(key, settings.HOST_KEY):
+        if not isinstance(key, str) or len(key) > 256 or not secrets.compare_digest(key.encode(), settings.HOST_KEY.encode()):
             raise engine.GameError("That host key is not correct. Use the key printed by the server.", 403)
         request.session.cycle_key()
-        request.session["host"] = True
+        request.session.pop("profile_id", None)
+        request.session.pop("host", None)
+        grant_host(request)
+        rotate_token(request)
     else:
         if data.get("action") not in ("register", "login"):
             raise engine.GameError("Choose register or sign in.")
@@ -158,19 +169,35 @@ def auth(request):
             raise engine.GameError("Use a passcode with 4–64 characters.")
         name_key = engine.normalize(name)
         if data["action"] == "register":
+            with engine.room_state() as s:
+                if len(s["players"]) >= 100:
+                    raise engine.GameError("This room is full (100 players).", 409)
+            # Hash outside the room lock, then atomically register and join. A
+            # concurrent final join must not leave an account behind on failure.
+            password_hash = make_password(password)
             try:
-                profile = Profile.objects.create(name=name, name_key=name_key, mal_username=mal,
-                    avatar=avatar, password=make_password(password))
+                with engine.room_state() as s:
+                    if len(s["players"]) >= 100:
+                        raise engine.GameError("This room is full (100 players).", 409)
+                    profile = Profile.objects.create(name=name, name_key=name_key, mal_username=mal,
+                        avatar=avatar, password=password_hash)
+                    engine.join(s, profile)
             except IntegrityError:
                 raise engine.GameError("That player name is already registered. Sign in or choose another.", 409)
         else:
             profile = Profile.objects.filter(name_key=name_key).first()
-            if not profile or not check_password(password, profile.password):
+            if not profile:
+                make_password(password)
                 raise engine.GameError("Player name or passcode is incorrect.", 403)
+            if not check_password(password, profile.password):
+                raise engine.GameError("Player name or passcode is incorrect.", 403)
+            with engine.room_state() as s:
+                engine.join(s, profile)
         request.session.cycle_key()
+        request.session.pop("host", None)
+        request.session.pop("host_grant", None)
         request.session["profile_id"] = profile.pk
-        with engine.room_state() as s:
-            engine.join(s, profile)
+        rotate_token(request)
     return {"ok": True}
 
 
@@ -178,6 +205,7 @@ def auth(request):
 def player(request):
     data = body(request)
     profile = require_profile(request)
+    throttle(request, "player", limit=120, window=60)
     action = data.get("action")
     if action == "profile":
         name, mal, avatar = validate_profile(data)
@@ -234,8 +262,11 @@ def logout(request):
     data = body(request)
     if data.get("role") == "host":
         request.session.pop("host", None)
+        request.session.pop("host_grant", None)
     else:
         request.session.pop("profile_id", None)
+    request.session.cycle_key()
+    rotate_token(request)
     return {"ok": True}
 
 
@@ -305,6 +336,10 @@ def results(request):
     with engine.room_state() as s:
         if s["phase"] not in ("reveal", "finished"):
             raise engine.GameError("Results are available after a round is revealed.", 409)
+        if s["phase"] == "finished":
+            completed = GameResult.objects.filter(result__gameId=s["gameId"]).order_by("-pk").first()
+            if completed:
+                s = completed.result
         out = io.StringIO()
         writer = csv.writer(out)
         writer.writerow(["Player", "MAL", "Score", "Round", "Anime", "Song", "Guess", "Correct", "Voided"])

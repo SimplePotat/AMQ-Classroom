@@ -23,6 +23,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 import logging
+import re
+from urllib.parse import urlencode
 
 import requests
 import requests.adapters
@@ -56,7 +58,7 @@ def add_url_kwargs(url, kwargs=None):
     if not kwargs:
         kwargs = {}
 
-    kwargs = "&".join(f"{k}={v}" for k, v in kwargs.items())
+    kwargs = urlencode(kwargs)
     return url + "?" + kwargs
 
 
@@ -73,17 +75,22 @@ def get_mal_part(username: str, **kwargs) -> list:
     Kwargs refer to the arguments `(sort=3,x='w') -> ?sort=3&x=w`.
     If a list is longer than 300 entries, you must set an offset.
     """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{2,32}", username):
+        raise MyanimelistException("Invalid MyAnimeList username.")
     url = MALURL.format(user=username)
     url = add_url_kwargs(url, kwargs)
 
-    r = requests.get(url)
+    try:
+        r = requests.get(url, timeout=(5, 20), allow_redirects=False)
+    except requests.RequestException as exc:
+        raise MyanimelistException("MyAnimeList is unavailable. Please try again later.") from exc
     if r.status_code == 200:
         return r.json()
     elif r.status_code == 400:
-        logger.info(f"User %s does not exist on MAL. Error: %s", username, r.json())
+        logger.info("User %s does not exist on MAL. Status: %s", username, r.status_code)
         raise MyanimelistException(f"User {username} does not exist on MAL.")
     else:
-        logger.error(f"Failed to download user %s from MAL. Error: %s", username, r.json())
+        logger.error("Failed to download user %s from MAL. Status: %s", username, r.status_code)
         raise MyanimelistException(f"Failed to download user {username} from MAL.", username)
 
 
@@ -94,7 +101,7 @@ def get_raw_mal(username: str, **kwargs) -> list:
     """
     out = []
     offset = 0
-    while True:
+    while offset < 30000:
         kwargs["offset"] = offset
         data = get_mal_part(username, **kwargs)
         out.extend(data)
@@ -102,6 +109,7 @@ def get_raw_mal(username: str, **kwargs) -> list:
             logger.debug(f"Got {len(data)} entries from MAL.")
             return out
         offset += 300
+    raise MyanimelistException("MyAnimeList list exceeds the supported size.")
 
 
 def filter_mal(data: list) -> list[tuple[int, str]]:

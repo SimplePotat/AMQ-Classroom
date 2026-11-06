@@ -133,8 +133,26 @@ try {
   await player.getByLabel('Your passcode').fill('classroom-test');
   await player.getByRole('button',{name:'Sign in & join'}).click();
   await waitState(player,s=>s.me?.mal==='yuki_list');
+  // A shared device must not expose one account's unsent draft to another.
+  assert.equal((await api(host,'/api/host',{action:'reset'})).status,200);
+  assert.equal((await api(host,'/api/host',{action:'prepare',settings:{...game.settings,source:'local',rounds:1,guessSeconds:60,randomStart:false}})).status,200);
+  await waitState(host,s=>s.phase==='ready');
+  assert.equal((await api(host,'/api/host',{action:'start'})).status,200);
+  await waitState(host,s=>s.phase==='guess');
+  await player.getByLabel('Your anime guess').fill('Yuki private unsent answer');
+  assert.equal((await api(player,'/api/auth',{action:'login',name:'Kai',password:'classroom-test'})).status,200);
+  await player.waitForFunction(()=>document.querySelector('.profile-mini strong')?.textContent==='Kai');
+  assert.equal(await player.getByLabel('Your anime guess').inputValue(),'','Identity switch exposed another player’s draft');
+  await player.getByLabel('Your anime guess').fill('Kai private unsent answer');
+  await player.getByRole('button',{name:'Edit profile'}).click();
+  await player.getByRole('button',{name:'Sign out',exact:true}).click();
+  await player.locator('#auth-form').getByLabel('Player name',{exact:true}).fill('Yuki');
+  await player.getByLabel('Your passcode').fill('classroom-test');
+  await player.getByRole('button',{name:'Sign in & join'}).click();
+  await player.waitForFunction(()=>document.querySelector('.profile-mini strong')?.textContent==='Yuki');
+  assert.equal(await player.getByLabel('Your anime guess').inputValue(),'','Logout did not clear the previous player’s draft');
   assert.deepEqual(errors,[],`Browser errors: ${errors.join(', ')}`);
-  console.log(`PASS: six profiles, host + phone + desktop, real audio${videoFixture?' and decoded video':''}, whiteboard, pause/resume, draft preservation, reconnect, automatic scoring/reveal, stale-answer rejection, CSV, reusable MAL profile, responsive layout.`);
+  console.log(`PASS: six profiles, host + phone + desktop, real audio${videoFixture?' and decoded video':''}, whiteboard, pause/resume, draft preservation and account isolation, reconnect, automatic scoring/reveal, stale-answer rejection, CSV, reusable MAL profile, responsive layout.`);
   console.log(`Screenshots: ${output}`);
 }catch(error){
   console.error(logs);throw error;

@@ -13,7 +13,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: pip install -r requirements-classroom.txt
+      - run: |
+          python -m pip install --upgrade 'pip>=26.2,<27'
+          python -m pip install -r requirements-classroom.txt
       - run: |
           python -m django makemigrations classroom --check --dry-run
           python -m django test classroom --verbosity 1
@@ -29,15 +31,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: pip install -r requirements-classroom.txt
+      - run: |
+          python -m pip install --upgrade 'pip>=26.2,<27'
+          python -m pip install -r requirements-classroom.txt
       - run: npm ci
+      - run: npm audit --audit-level=low
       - run: npx playwright install --with-deps chromium --only-shell
       - run: sudo apt-get install -y ffmpeg
       - run: npm run test:browser
         env:
           PYTHON: python
+      - run: node scripts/test_legacy_browser.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: classroom-previews
           path: test-results/
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --upgrade 'pip>=26.2,<27'
+          python -m pip install pip-audit
+          pip-audit -r requirements-classroom.txt

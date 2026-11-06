@@ -22,6 +22,7 @@ Or set it up manually:
 
 ```sh
 python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade 'pip>=26.2,<27'
 .venv/bin/python -m pip install -r requirements-classroom.txt
 .venv/bin/python run_classroom.py
 ```
@@ -46,6 +47,8 @@ The server binds to `0.0.0.0:8009`. Its IP detection chooses the active interfac
 ```
 
 Replace that example with the host computer's actual LAN address. Allow inbound TCP on the chosen port in the host firewall. School guest networks sometimes block device-to-device traffic; use a network that allows clients to reach the host. No router port forwarding is required. `localhost` works only on the host computer.
+
+By default, HTTP requests must use a literal IP address or `localhost`. To use a named address, explicitly list it in `CLASSROOM_ALLOWED_HOSTS` (without a scheme or port). For example, `CLASSROOM_ALLOWED_HOSTS='*,classroom.school.test'` permits that name plus literal IPs/localhost. The `*` enables IP access; it does not permit arbitrary domain names. This prevents a website from using DNS rebinding to reach the classroom server.
 
 ## Included functionality
 
@@ -81,7 +84,7 @@ Players save their **username**, never their MAL password. Choose **Group's MAL 
 
 The server combines the selected lists, samples up to 80 anime in randomized order, and looks up their themes on AnimeThemes. It stops when there are enough candidates for the requested quiz. MAL responses are cached for seven days and AnimeThemes metadata for 30 days. The selection is a union of the group's lists, not a guarantee of equal representation per player. Every selected theme is unique within a quiz.
 
-A missing/private list or unavailable provider produces a visible error instead of silently switching to another person's list. Some anime have no suitable video; if fewer songs match than requested, the host sees the actual round count before starting. Internet filters or provider rate limits can prevent online loading.
+A missing/private list is skipped with a warning visible to the host; other players' valid lists can still produce a quiz. If all lists fail, preparation stops with an error. Provider rate limits also stop preparation. Imports accept up to 20,000 entries per list, and the combined anime pool and autocomplete are capped at 20,000. Some anime have no suitable video; if fewer songs match than requested, the host sees the actual round count before starting. Internet filters can prevent online loading.
 
 ### Fully local / offline music
 
@@ -126,6 +129,8 @@ Runtime data lives in **`data/`**, which is excluded from Git and source archive
 
 Back up this directory with the server stopped. To move the classroom to another computer, copy it alongside the source. Do not share this directory with players. The UI exposes a Source link to this AGPL-licensed fork.
 
+On POSIX systems, startup restricts the data directory to its owner (`0700`) and secrets/database files to `0600`, including existing installations. Windows deployments rely on the folder's Windows access permissions. Anonymous visitors receive no roster or game details; signed-in players can see their own MAL username but not other players' MAL links.
+
 | Environment variable | Purpose |
 | --- | --- |
 | `CLASSROOM_DATA_DIR` | Store runtime data somewhere other than `./data` |
@@ -136,9 +141,25 @@ Back up this directory with the server stopped. To move the classroom to another
 
 Run **one server process per data directory**. The threaded Waitress server serializes room transitions and persists them atomically in SQLite. The browser polls once a second; countdowns interpolate from server time. This is designed for a trusted classroom LAN over HTTP, not as a public internet service. Host actions require a host session; player mutations require a signed-in profile, and all state-changing requests use Django CSRF protection.
 
+Player sessions last up to 90 days. Host authorization expires after 12 hours and is invalidated when the host key changes and the server restarts with the new key. Signing in as a player removes host authorization from that browser session, and signing in as host removes the player identity. Use a separate browser profile/device if the host also wants to play. Signing out rotates the session and CSRF tokens; unsent drafts are cleared when the player identity changes.
+
+HTTP does not encrypt passcodes or session cookies in transit. Use classroom-specific passcodes and a trusted network. A host key is a privileged credential; keep it off the projected terminal. This edition does not provide TLS termination, public registration moderation, or distributed denial-of-service protection.
+
 Only one host display should play audio. The host should keep its tab active. New players joining during a game spectate until the next game. There is no automatic account recovery; keep player passcodes somewhere the players can remember. Registered names and passcodes belong to this local server, not to MAL.
 
 The roster supports 100 entries. Automated verification covers six browser participants and concurrent state updates, not a 100-device classroom load test.
+
+### Updating an existing installation
+
+Stop the server, back up `data/`, pull the latest source, then update dependencies before restarting:
+
+```sh
+.venv/bin/python -m pip install --upgrade 'pip>=26.2,<27'
+.venv/bin/python -m pip install --upgrade -r requirements-classroom.txt
+./start-classroom.sh
+```
+
+On Windows, substitute `.venv\Scripts\python.exe` and `start-classroom.cmd`. Existing virtual environments are not automatically upgraded by the launcher. Old host sessions must sign in again after this security update; saved player profiles and game results remain available. See [the security review](docs/SECURITY_REVIEW.md) for findings, verification and scope.
 
 ## Development and verification
 
@@ -154,14 +175,17 @@ Optional browser tests require Node 24+:
 npm ci
 npx playwright install chromium --only-shell
 npm run test:browser
+node scripts/test_legacy_browser.mjs
 ```
 
 Set `PYTHON` if the Python executable is not `.venv/bin/python` (or `.venv\Scripts\python.exe` on Windows). The browser suite starts an isolated server, generates synthetic test audio, registers six profiles, uses separate host/phone/desktop sessions, verifies audio, whiteboard mode, answer privacy, scoring, pause/resume, reconnects, CSV and reusable profiles, and writes screenshots into `test-results/`. If FFmpeg is installed, it also generates a video test pattern and verifies video decoding and reveal. CI includes FFmpeg. It removes its temporary database afterwards. No real music or user data is part of these tests.
 
-The included GitHub Actions workflow runs server checks on Python 3.12/3.13 and browser checks on Chromium. The upstream deployment workflows are restricted to the upstream repository so this fork does not attempt to publish to the original author's servers.
+The included GitHub Actions workflow runs server checks on Python 3.12/3.13, both browser suites on Chromium, and Python/npm dependency audits. The upstream deployment workflows are restricted to the upstream repository so this fork does not attempt to publish to the original author's servers.
 
 ## Upstream and license
 
 Forked from [przemub/anime_quiz](https://github.com/przemub/anime_quiz), based on commit `d087636`. The original Django app, templates, assets, and deployment files remain available; its instructions are preserved in [README.upstream.md](README.upstream.md). The classroom edition has independent Django settings and URLs and does not require changes to the original Redis-backed setup.
+
+The retained upstream app also receives security fixes. Its development settings now require `QUIZ_DEBUG=1` to enable debug mode, accept only localhost by default (override with `QUIZ_ALLOWED_HOSTS`), and generate a temporary signing secret unless `QUIZ_SECRET_KEY` is supplied. Set a persistent secret for any multi-process or persistent legacy deployment. Old legacy scoreboard HTML in browser storage is discarded; new scoreboards use JSON. These settings and scoreboard changes do not affect the classroom app.
 
 **AGPL-3.0-or-later**, see [COPYING](COPYING). Original attribution is preserved. Classroom artwork and icons are original SVG assets. Song metadata and stream links come from [AnimeThemes](https://animethemes.moe); anime lists come from [MyAnimeList](https://myanimelist.net). Media remains hosted by its providers or supplied by the host.
