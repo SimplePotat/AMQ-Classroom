@@ -624,12 +624,6 @@ footer b {
   word-break:break-all
 }
 
-.join-panel p {
-  font-size:10px;
-  color:var(--muted);
-  margin:4px 0
-}
-
 .copy-link {
   border:0;
   background:none;
