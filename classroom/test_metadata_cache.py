@@ -183,7 +183,9 @@ class AnimeBatchCacheTests(TransactionTestCase):
         with engine.room_state() as state:
             state.update(phase="loading", loadId="batch-test")
         with patch("classroom.library.mal_list", return_value=mal_entries(40)), patch(
-                "classroom.library.get_json", side_effect=batch_response) as fetch:
+                "classroom.library.get_json", side_effect=batch_response) as fetch, patch(
+                "classroom.metadata.requests.Session.get") as probe:
+            probe.return_value.__enter__.return_value.status_code = 206
             library.prepare("batch-test", engine.validate_settings({"source": "mal", "rounds": 100}), ["alice"])
         state = Room.objects.get(pk=1).state
         self.assertEqual(state["phase"], "ready", state["message"])
@@ -325,7 +327,9 @@ class LobbyCacheTests(TransactionTestCase):
         def respond(url, params):
             return mal_entries(2) if "myanimelist.net" in url else batch_response(url, params)
         before = copy.deepcopy(Room.objects.get(pk=1).state)
-        with patch("classroom.library.get_json", side_effect=respond) as fetch:
+        with patch("classroom.library.get_json", side_effect=respond) as fetch, patch(
+                "classroom.metadata.requests.Session.get") as probe:
+            probe.return_value.__enter__.return_value.status_code = 206
             prefetch._warm("1", "player_1")
             self.assertEqual(Room.objects.get(pk=1).state, before)
             self.assertEqual(fetch.call_count, 2)
@@ -492,7 +496,9 @@ class OpeningsFallbackTests(TransactionTestCase):
         with engine.room_state() as state:
             state.update(phase="loading", loadId="healthy")
         with patch("classroom.library.mal_list", return_value=mal_entries(2)), patch(
-                "classroom.library.get_json", side_effect=respond):
+                "classroom.library.get_json", side_effect=respond), patch(
+                "classroom.metadata.requests.Session.get") as probe:
+            probe.return_value.__enter__.return_value.status_code = 206
             library.prepare("healthy", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
         state = Room.objects.get(pk=1).state
         self.assertEqual(state["phase"], "ready", state["message"])

@@ -236,7 +236,9 @@ class ClassroomTests(TransactionTestCase):
     def test_starter_preparation_has_real_metadata_and_no_repeated_themes(self):
         with engine.room_state() as s:
             s.update(phase="loading", loadId="test-load")
-        library.prepare("test-load", engine.validate_settings({"rounds": 25}), [])
+        with patch("classroom.metadata.requests.Session.get") as probe:
+            probe.return_value.__enter__.return_value.status_code = 206
+            library.prepare("test-load", engine.validate_settings({"rounds": 25}), [])
         s = Room.objects.get(pk=1).state
         self.assertEqual(s["phase"], "ready", s["message"])
         self.assertEqual(len(s["queue"]), 25)

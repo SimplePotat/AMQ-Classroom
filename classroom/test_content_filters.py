@@ -81,7 +81,9 @@ class ContentFilterPoolTests(TransactionTestCase):
                                       value=[{"anime_id": 1, "anime_title": "Fixture", "status": 2}])
         cached = CachedResource.objects.create(key="anime:mal:1", value=[fixture], expires_at=time.time() + 100)
         with patch("classroom.library.get_json", side_effect=AssertionError("Already cached")), patch(
-                "classroom.library.Path.read_text", return_value=json.dumps([fixture])):
+                "classroom.library.Path.read_text", return_value=json.dumps([fixture])), patch(
+                "classroom.metadata.requests.Session.get") as probe:
+            probe.return_value.__enter__.return_value.status_code = 206
             for source in ("starter", "mal"):
                 for allow_nsfw, allow_spoilers, expected in FILTER_CASES:
                     with self.subTest(source=source, nsfw=allow_nsfw, spoilers=allow_spoilers):

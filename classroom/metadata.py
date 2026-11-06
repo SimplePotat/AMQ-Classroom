@@ -13,6 +13,7 @@ import requests
 from .engine import GameError
 
 JSON_HOSTS = frozenset({"api.animethemes.moe", "myanimelist.net", "openings.moe"})
+MEDIA_PROBE_HOSTS = frozenset({"v.animethemes.moe", "openings.moe"})
 MAX_JSON_BYTES = 4 * 1024 * 1024
 LOCAL = threading.local()
 RATE_LOCK = threading.Lock()
@@ -66,6 +67,25 @@ def close_session():
     if session is not None:
         session.close()
         del LOCAL.session
+
+
+def media_playable(url):
+    """A tiny range probe tells preparation the video host will serve this file."""
+    try:
+        target = urlparse(url)
+    except ValueError:
+        return False
+    if target.scheme != "https" or not target.hostname or target.hostname not in MEDIA_PROBE_HOSTS:
+        return True
+    if target.username or target.password or target.port not in (None, 443):
+        return False
+    checkpoint()
+    try:
+        with http_session().get(url, headers={"Range": "bytes=0-0"}, timeout=(3, 5),
+                                stream=True, allow_redirects=False) as response:
+            return response.status_code in (200, 206, 416)
+    except requests.RequestException:
+        return False
 
 
 def wait_for_provider(host):

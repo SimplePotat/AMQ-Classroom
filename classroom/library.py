@@ -2,6 +2,7 @@
 import json
 import logging
 import random
+import re
 import secrets
 import threading
 import time
@@ -184,6 +185,15 @@ def anime_data_batch(mal_ids):
     return found
 
 
+def _openings_keys(source):
+    keys = {engine.normalize(source)}
+    for part in re.split(r"[()]", source):
+        part = part.strip()
+        if part and not part.isdigit():
+            keys.add(engine.normalize(part))
+    return keys
+
+
 def openings_catalog():
     def fetch():
         payload = get_json("https://openings.moe/api/list.php")
@@ -193,7 +203,8 @@ def openings_catalog():
             raise GameError("The music provider returned invalid anime data.")
         catalog = {}
         for record in payload:
-            catalog.setdefault(engine.normalize(record["source"]), []).append(record)
+            for key in _openings_keys(record["source"]):
+                catalog.setdefault(key, []).append(record)
         return catalog
     return cached("openings:catalog", OPENINGS_TTL, fetch)
 
@@ -264,6 +275,15 @@ def songs_from_openings(batch, options, limit):
             if len(songs) >= limit:
                 return songs
     return songs
+
+
+def _openings_replacement(song, options):
+    pairs = [(0, title) for title in (song["anime"], *song.get("aliases", []))]
+    for types in ([song["type"]], options["types"]):
+        replacement = songs_from_openings(pairs, {**options, "types": types}, 1)
+        if replacement:
+            return replacement[0]
+    return None
 
 
 def local_catalog():
@@ -400,6 +420,19 @@ def _prepare(load_id, options, usernames):
             sorted(titles - playable_titles)[:max(0, MAX_CANDIDATES - len(playable_titles))])
         RANDOM.shuffle(songs)
         queue = songs[:options["rounds"]]
+        for i, song in enumerate(queue):
+            if not song["media"].startswith("https://") or metadata.media_playable(song["media"]):
+                continue
+            try:
+                replacement = _openings_replacement(song, options)
+            except GameError as exc:
+                LOG.warning("Fallback swap failed for %s: %s", song["anime"], exc)
+                replacement = None
+            if replacement:
+                LOG.warning("Upstream media unreachable for %s; swapped to openings.moe", song["anime"])
+                queue[i] = replacement
+            else:
+                LOG.warning("Upstream media unreachable for %s with no openings.moe copy matched; queued anyway", song["anime"])
         for song in queue:
             song["roundId"] = secrets.token_hex(12)
             song["startAt"] = RANDOM.randint(0, 30) if options["randomStart"] else 0
