@@ -121,6 +121,7 @@ try {
   if(videoFixture)assert.equal(await video.evaluate(v=>v.videoWidth>0&&v.videoHeight>0),true,'Video did not decode');
   assert.equal(await video.evaluate(v=>Number(getComputedStyle(v).opacity)),0,'Video visible while guessing');
   assert.equal(await player.locator('video').count(),0,'Player should not receive media');
+  await host.getByText('ROUND 01 / 02',{exact:true}).waitFor();
   await player.getByLabel('Your anime guess').fill('unsent draft');
   await host.getByRole('button',{name:'Ⅱ Pause',exact:true}).click();
   await waitState(player,s=>s.paused);
@@ -144,9 +145,11 @@ try {
   await delay(1200);
   assert.equal(game.players.reduce((sum,p)=>sum+p.score,0),1,'Exactly one player should score');
   assert.equal(await video.evaluate(v=>Number(getComputedStyle(v).opacity)),1,'Video not revealed');
+  await host.getByText('ROUND 01 / 02',{exact:true}).waitFor({state:'hidden'});
   await host.screenshot({path:join(output,'host-reveal.png'),fullPage:true});
   await host.getByRole('button',{name:'Next song'}).click();
   await waitState(host,s=>s.phase==='guess');
+  await host.getByText('ROUND 02 / 02',{exact:true}).waitFor();
   const forbidden=await api(player,'/api/host',{action:'reset'});assert.equal(forbidden.status,403);
   const stale=await api(player,'/api/player',{action:'guess',text:'Cowboy Bebop',roundId:game.roundId});assert.equal(stale.status,409);
   await host.getByRole('button',{name:'Reveal answer',exact:true}).click();
@@ -191,6 +194,7 @@ try {
   await delay(1500);
   assert.equal(await video.evaluate(v=>v.currentTime<3),true,'Full reveal did not restart the video from the start');
   assert.equal(await video.evaluate(v=>Number(getComputedStyle(v).opacity)),1,'Video not revealed in full mode');
+  await host.getByText('ROUND 01 / 01',{exact:true}).waitFor({state:'hidden'});
   await host.screenshot({path:join(output,'host-full-reveal.png'),fullPage:true});
   for(const action of ['skip','void','next','reveal-ended']){
     assert.equal((await api(player,'/api/player',{action,roundId:fullReveal.roundId})).status,403,`Player ${action} was not rejected`);
