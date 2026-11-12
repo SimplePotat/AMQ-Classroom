@@ -212,13 +212,16 @@ def player(request):
         raise engine.GameError("Only the host can skip or advance songs.", 403)
     if action == "profile":
         name, mal, avatar = validate_profile(data)
-        profile.name, profile.name_key = name, engine.normalize(name)
-        profile.mal_username, profile.avatar = mal, avatar
-        try:
-            profile.save()
-        except IntegrityError:
-            raise engine.GameError("That player name is already in use.", 409)
     with engine.room_state() as s:
+        if action == "profile":
+            # A failed rejoin must roll back the saved profile as well as the
+            # roster, for example when a removed player's room has filled up.
+            profile.name, profile.name_key = name, engine.normalize(name)
+            profile.mal_username, profile.avatar = mal, avatar
+            try:
+                profile.save()
+            except IntegrityError:
+                raise engine.GameError("That player name is already in use.", 409)
         if action in ("join", "profile"):
             engine.join(s, profile)
         elif action == "guess":

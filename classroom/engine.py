@@ -140,7 +140,8 @@ def validate_settings(data):
         settings[name] = value
     for name, allowed in [("types", ["OP", "ED"]), ("statuses", [1, 2, 3, 4, 6])]:
         value = data.get(name, settings[name])
-        if not isinstance(value, list) or not value or any(v not in allowed for v in value):
+        if (not isinstance(value, list) or not value
+                or any(type(v) is not type(allowed[0]) or v not in allowed for v in value)):
             raise GameError(f"Select at least one valid {name} option.")
         settings[name] = list(dict.fromkeys(value))
     settings["source"] = data.get("source", "starter")
@@ -156,6 +157,10 @@ def validate_settings(data):
 
 def control(s, action, data):
     phase = s["phase"]
+    if action in ("pause", "reveal", "void", "next", "correct") and "roundId" in data:
+        song = current(s)
+        if not song or data["roundId"] != song["roundId"]:
+            raise GameError("This command belongs to a different round.", 409)
     if action == "start":
         if phase != "ready" or not s["queue"]:
             raise GameError("Prepare a song pool first.", 409)

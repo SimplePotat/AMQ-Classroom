@@ -19,6 +19,7 @@ jobs:
       - run: |
           python -m django makemigrations classroom --check --dry-run
           python -m django test classroom --verbosity 1
+          python scripts/test_legacy_units.py
         env:
           DJANGO_SETTINGS_MODULE: classroom.settings
   browser:
@@ -42,6 +43,7 @@ jobs:
         env:
           PYTHON: python
       - run: node scripts/test_legacy_browser.mjs
+      - run: python scripts/service_stress.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

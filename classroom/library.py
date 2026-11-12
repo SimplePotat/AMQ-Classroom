@@ -246,7 +246,7 @@ def songs_from_openings(batch, options, limit):
     if limit <= 0:
         return songs
     catalog = openings_catalog()
-    for _, title in batch:
+    for mal_id, title in batch:
         records = catalog.get(engine.normalize(title), [])
         RANDOM.shuffle(records)
         for record in records:
@@ -259,6 +259,8 @@ def songs_from_openings(batch, options, limit):
             try:
                 details = openings_details(uid)
             except GameError as exc:
+                if "rate limiting" in str(exc):
+                    raise
                 LOG.warning("Fallback details failed for %s: %s", uid, exc)
                 continue
             if ((details.get("nsfw") and not options.get("allowNsfw", False))
@@ -268,13 +270,21 @@ def songs_from_openings(batch, options, limit):
             aliases = [title]
             if engine.normalize(record["source"]) != engine.normalize(title):
                 aliases.append(record["source"])
-            songs.append({"id": f"om-{uid}", "anime": title, "aliases": aliases,
+            songs.append({"id": f"om-{uid}", "malId": mal_id, "anime": title, "aliases": aliases,
                 "song": song.get("title") or "Unknown title", "artist": song.get("artist") or "Artist not listed",
                 "type": kind, "year": None,
                 "media": f"https://openings.moe/video/{details['file']}.webm"})
             if len(songs) >= limit:
                 return songs
+            # Only one song per show can enter a match. Cover the next show
+            # before spending requests on more versions of this one.
+            break
     return songs
+
+
+def show_key(song):
+    mal_id = song.get("malId")
+    return ("mal", mal_id) if type(mal_id) is int and mal_id > 0 else ("title", engine.normalize(song["anime"]))
 
 
 def _openings_replacement(song, options):
@@ -282,7 +292,8 @@ def _openings_replacement(song, options):
     for types in ([song["type"]], options["types"]):
         replacement = songs_from_openings(pairs, {**options, "types": types}, 1)
         if replacement:
-            return replacement[0]
+            return {**replacement[0], "anime": song["anime"], "malId": song.get("malId"),
+                    "aliases": list(dict.fromkeys([*song.get("aliases", []), *replacement[0]["aliases"]]))}
     return None
 
 
@@ -384,10 +395,21 @@ def _prepare(load_id, options, usernames):
             RANDOM.shuffle(candidates)
             candidates = candidates[:MAX_THEME_CANDIDATES]
             songs = []
+            pool_target = max(30, options["rounds"] * 3)
             if options.get("preferOpenings"):
-                songs.extend(songs_from_openings(candidates, options, max(30, options["rounds"] * 3)))
+                try:
+                    songs.extend(songs_from_openings(candidates, options, pool_target))
+                except GameError as exc:
+                    if "rate limiting" in str(exc):
+                        raise
+                    LOG.warning("Preferred provider lookup failed: %s", exc)
+                    load_errors.append(str(exc))
+                # Preserve the provider preference after the pool is shuffled,
+                # including when providers use different titles for one MAL ID.
+                supplied = {song["malId"] for song in songs}
+                candidates = [(mal_id, title) for mal_id, title in candidates if mal_id not in supplied]
             for i in range(0, len(candidates), ANIME_BATCH_SIZE):
-                if len(songs) >= max(30, options["rounds"] * 3):
+                if len({show_key(song) for song in songs}) >= pool_target:
                     break
                 batch = candidates[i:i + ANIME_BATCH_SIZE]
                 progress(f"Finding themes · {batch[0][1]}", min(95, 15 + round(80 * i / len(candidates))))
@@ -395,7 +417,7 @@ def _prepare(load_id, options, usernames):
                     resolved = anime_data_batch([mal_id for mal_id, _ in batch])
                     for mal_id, title in batch:
                         for anime in resolved[mal_id]:
-                            songs.extend(songs_from_anime(anime, title, options))
+                            songs.extend({**song, "malId": mal_id} for song in songs_from_anime(anime, title, options))
                 except GameError as exc:
                     if "rate limiting" in str(exc):
                         raise
@@ -405,8 +427,10 @@ def _prepare(load_id, options, usernames):
                     warnings.extend(title for _, title in batch)
                     if options.get("allowOpeningsFallback"):
                         try:
-                            songs.extend(songs_from_openings(batch, options, max(30, options["rounds"] * 3) - len(songs)))
+                            songs.extend(songs_from_openings(batch, options, pool_target - len({show_key(song) for song in songs})))
                         except GameError as fallback_exc:
+                            if "rate limiting" in str(fallback_exc):
+                                raise
                             LOG.warning("Fallback lookup failed: %s", fallback_exc)
                             if not load_errors:
                                 load_errors.append(str(fallback_exc))
@@ -426,7 +450,7 @@ def _prepare(load_id, options, usernames):
         for song in songs:
             if len(queue) >= options["rounds"]:
                 break
-            show = engine.normalize(song["anime"])
+            show = show_key(song)
             if show in seen_shows:
                 continue
             seen_shows.add(show)
@@ -439,6 +463,8 @@ def _prepare(load_id, options, usernames):
             try:
                 replacement = _openings_replacement(song, options)
             except GameError as exc:
+                if "rate limiting" in str(exc):
+                    raise
                 LOG.warning("Fallback swap failed for %s: %s", song["anime"], exc)
                 replacement = None
             if replacement:

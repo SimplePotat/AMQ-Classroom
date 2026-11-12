@@ -156,7 +156,7 @@ HTTP does not encrypt passcodes or session cookies in transit. Use classroom-spe
 
 Only one host display should play audio. The host should keep its tab active. New players joining during a game spectate until the next game. There is no automatic account recovery; keep player passcodes somewhere the players can remember. Registered names and passcodes belong to this local server, not to MAL.
 
-The roster supports 100 entries. Automated verification covers six browser participants and concurrent state updates, not a 100-device classroom load test.
+The roster supports 100 entries. Automated verification covers six browser participants and 100 simulated HTTP sessions on loopback, including concurrent registration, guesses, polling, and a server process restart. This does not measure a physical 100-device Wi-Fi classroom.
 
 ## Development and verification
 
@@ -164,6 +164,8 @@ Server tests need no external services or music downloads:
 
 ```sh
 DJANGO_SETTINGS_MODULE=classroom.settings .venv/bin/python -m django test classroom
+.venv/bin/python scripts/test_legacy_units.py
+.venv/bin/python scripts/service_stress.py
 ```
 
 Optional browser tests require Node 24+:
@@ -177,7 +179,9 @@ node scripts/test_legacy_browser.mjs
 
 Set `PYTHON` if the Python executable is not `.venv/bin/python` (or `.venv\Scripts\python.exe` on Windows). The browser suite starts an isolated server, generates synthetic test audio, registers six profiles, uses separate host/phone/desktop sessions, verifies audio, whiteboard mode, answer privacy, scoring, pause/resume, reconnects, CSV and reusable profiles, and writes screenshots into `test-results/`. If FFmpeg is installed, it also generates a video test pattern and verifies video decoding and reveal. CI includes FFmpeg. It removes its temporary database afterwards. No real music or user data is part of these tests.
 
-The included GitHub Actions workflow runs server checks on Python 3.12/3.13, both browser suites on Chromium, and Python/npm dependency audits. The upstream deployment workflows are restricted to the upstream repository so this fork does not attempt to publish to the original author's servers.
+The browser regression suite also tests interrupted playback notifications, native full-video endings, pause/resume and reload during reveals, corrupt volume preferences, stale host controls, and settings validation on a phone-sized host screen. The HTTP stress script starts an isolated server with temporary synthetic media and 100 clients using distinct loopback addresses; it checks the roster limit, privacy, exact scores, CSV, and session/answer recovery after restarting the process. Both scripts remove their temporary data.
+
+The included GitHub Actions workflow runs server checks on Python 3.12/3.13, all browser suites on Chromium, the HTTP stress script, and Python/npm dependency audits. The upstream deployment workflows are restricted to the upstream repository so this fork does not attempt to publish to the original author's servers.
 
 ## Upstream and license
 

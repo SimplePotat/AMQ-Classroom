@@ -7,7 +7,7 @@ const app = $('#app');
 const palettes = [['#dca5b6','#543a55'],['#8be2c5','#294d52'],['#e3c17f','#665044'],['#a7b3ed','#3d466d'],['#f1a988','#64414a'],['#8cc8e4','#304b69'],['#cbb0e8','#594572'],['#b8d59b','#425948']];
 const avatarNames = ['Sakura','Jade','Kitsune','Orbit','Ember','Wave','Luna','Forest'];
 let state = null, shell = '', authMode = 'register', selectedAvatar = 0, busyPoll = false;
-let serverOffset = 0, connected = false, mediaRound = null, beginRequested = null, stalledTimer = null;
+let serverOffset = 0, connected = false, mediaRound = null, playingRound = null, beginRequested = null, stalledTimer = null;
 let cardKey = '', toastTimer, fullRevealRound = null, revealEndRequested = null;
 const drafts = new Map();
 let draftOwner = null;
@@ -34,7 +34,8 @@ async function request(path, data) {
   return result;
 }
 async function command(action, extra = {}) {
-  try { await request('/api/host', {action, ...extra}); await poll(); }
+  const round = ['pause','reveal','void','next','correct'].includes(action) ? {roundId:state?.roundId} : {};
+  try { await request('/api/host', {action, ...round, ...extra}); await poll(); }
   catch (error) { toast(error.message, true); throw error; }
 }
 async function playerAction(action, extra = {}) {
@@ -75,7 +76,7 @@ function render() {
   $('#source-link').href = state.sourceUrl;
   const nextShell = hostView ? (state.host ? 'host-room' : 'host-auth') : (state.me ? 'player-room' : 'player-auth');
   if (nextShell !== shell) {
-    shell = nextShell; cardKey = ''; mediaRound = null; fullRevealRound = null; revealEndRequested = null;
+    shell = nextShell; cardKey = ''; mediaRound = null; playingRound = null; fullRevealRound = null; revealEndRequested = null;
     if (shell.endsWith('auth')) renderAuth(); else renderRoomShell();
   }
   if (shell.endsWith('room')) renderRoom();
@@ -182,6 +183,15 @@ function updateTimer() {
 }
 
 function mediaAlert(message) { $('#media-message').textContent = message; $('#media-alert').hidden = false; }
+async function notifyPlaybackStarted(video) {
+  const s = state;
+  if (s?.phase !== 'buffering' || s.paused || video.paused || video.seeking || video.readyState < 3 ||
+      playingRound !== s.roundId || beginRequested === s.roundId) return;
+  const roundId = s.roundId;
+  beginRequested = roundId;
+  try { await command('begin',{roundId}); }
+  catch { if (beginRequested === roundId) beginRequested = null; }
+}
 function restartFullReveal(video) {
   if (state?.phase !== 'reveal' || !state.settings.fullReveal || video.readyState < 1 || fullRevealRound === state.roundId) return;
   fullRevealRound = state.roundId;
@@ -199,7 +209,12 @@ async function notifyRevealEnded(video) {
 }
 function setupVideo() {
   const video = $('#round-video');
-  video.volume = Number(localStorage.getItem('classroom-volume') || 0.7);
+  let volume = 0.7;
+  try {
+    const stored = Number(localStorage.getItem('classroom-volume') ?? 0.7);
+    if (Number.isFinite(stored) && stored >= 0 && stored <= 1) volume = stored;
+  } catch { /* Playback also works when browser storage is unavailable. */ }
+  video.volume = volume;
   $('#volume').value = video.volume;
   video.addEventListener('loadedmetadata', () => {
     if (!state || !['buffering','guess','reveal'].includes(state.phase)) return;
@@ -210,13 +225,11 @@ function setupVideo() {
     else video.currentTime = Math.max(0,Math.min(duration-0.2,start+elapsed));
     if (!state.paused) tryPlay();
   });
-  video.addEventListener('playing', async () => {
+  video.addEventListener('playing', () => {
     clearTimeout(stalledTimer);
     $('#media-alert').hidden = true;
-    if (state?.phase === 'buffering' && beginRequested !== state.roundId) {
-      beginRequested = state.roundId;
-      try { await command('begin',{roundId:state.roundId}); } catch { beginRequested = null; }
-    }
+    playingRound = mediaRound;
+    void notifyPlaybackStarted(video);
   });
   video.addEventListener('waiting', () => {
     clearTimeout(stalledTimer);
@@ -252,12 +265,13 @@ function syncVideo() {
     return;
   }
   if (mediaRound !== s.roundId) {
-    mediaRound=s.roundId; beginRequested=null; fullRevealRound=null; revealEndRequested=null; $('#media-alert').hidden=true;
+    mediaRound=s.roundId; playingRound=null; beginRequested=null; fullRevealRound=null; revealEndRequested=null; $('#media-alert').hidden=true;
     video.src=s.mediaUrl; video.load();
   }
   restartFullReveal(video);
   if (s.paused || (s.phase==='reveal' && s.settings.fullReveal && s.revealEnded)) video.pause();
   else if (video.paused && !video.ended && video.readyState>=2 && $('#media-alert').hidden) tryPlay();
+  void notifyPlaybackStarted(video);
   void notifyRevealEnded(video);
 }
 
@@ -341,7 +355,10 @@ document.addEventListener('change', event => {
 });
 document.addEventListener('input', event => {
   if (event.target.id==='guess-input') drafts.set(state.roundId,event.target.value);
-  if (event.target.id==='volume') {const volume=Number(event.target.value);$('#round-video').volume=volume;localStorage.setItem('classroom-volume',String(volume));}
+  if (event.target.id==='volume') {
+    const volume=Number(event.target.value); $('#round-video').volume=volume;
+    try {localStorage.setItem('classroom-volume',String(volume));} catch { /* Volume remains adjustable without storage. */ }
+  }
 });
 document.addEventListener('submit', async event => {
   const form=event.target;

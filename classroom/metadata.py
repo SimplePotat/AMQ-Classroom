@@ -73,11 +73,11 @@ def media_playable(url):
     """A tiny range probe tells preparation the video host will serve this file."""
     try:
         target = urlparse(url)
+        if target.scheme != "https" or not target.hostname or target.hostname not in MEDIA_PROBE_HOSTS:
+            return True
+        if target.username or target.password or target.port not in (None, 443):
+            return False
     except ValueError:
-        return False
-    if target.scheme != "https" or not target.hostname or target.hostname not in MEDIA_PROBE_HOSTS:
-        return True
-    if target.username or target.password or target.port not in (None, 443):
         return False
     checkpoint()
     try:
