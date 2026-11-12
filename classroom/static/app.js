@@ -26,12 +26,19 @@ function toast(message, error = false) {
 }
 function csrf() { return document.cookie.split('; ').find(c => c.startsWith('csrftoken='))?.split('=')[1] || ''; }
 async function request(path, data) {
-  const response = await fetch(path, {method:data ? 'POST' : 'GET', credentials:'same-origin', cache:'no-store',
-    headers:data ? {'Content-Type':'application/json','X-CSRFToken':csrf()} : {}, body:data ? JSON.stringify(data) : undefined});
-  let result;
-  try { result = await response.json(); } catch { throw new Error('The server could not process that request. Refresh and try again.'); }
-  if (!response.ok) throw new Error(result.error || 'The request failed. Refresh and try again.');
-  return result;
+  // A lost state response must not keep busyPoll set forever. Mutations retain
+  // their normal lifetime: timing one out cannot tell us whether it committed.
+  const controller = path === '/api/state' ? new AbortController() : null;
+  const timeout = controller ? setTimeout(()=>controller.abort(),8000) : null;
+  try {
+    const response = await fetch(path, {method:data ? 'POST' : 'GET', credentials:'same-origin', cache:'no-store',
+      headers:data ? {'Content-Type':'application/json','X-CSRFToken':csrf()} : {}, body:data ? JSON.stringify(data) : undefined,
+      signal:controller?.signal});
+    let result;
+    try { result = await response.json(); } catch { throw new Error('The server could not process that request. Refresh and try again.'); }
+    if (!response.ok) throw new Error(result.error || 'The request failed. Refresh and try again.');
+    return result;
+  } finally { if (timeout) clearTimeout(timeout); }
 }
 async function command(action, extra = {}) {
   const round = ['pause','reveal','void','next','correct'].includes(action) ? {roundId:state?.roundId} : {};
@@ -70,12 +77,16 @@ function render() {
     drafts.clear();
     draftOwner = nextDraftOwner;
     cardKey = '';
+    // Another tab can sign out or switch accounts while this editor is open.
+    $('#profile-dialog').close();
+    $('#profile-dialog').innerHTML = '';
   }
   $('#mode-link').href = hostView ? '/' : '/host';
   $('#mode-link').textContent = hostView ? 'Player portal' : 'Host desk';
   $('#source-link').href = state.sourceUrl;
   const nextShell = hostView ? (state.host ? 'host-room' : 'host-auth') : (state.me ? 'player-room' : 'player-auth');
   if (nextShell !== shell) {
+    document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());
     shell = nextShell; cardKey = ''; mediaRound = null; playingRound = null; fullRevealRound = null; revealEndRequested = null;
     if (shell.endsWith('auth')) renderAuth(); else renderRoomShell();
   }

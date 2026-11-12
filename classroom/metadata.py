@@ -1,5 +1,4 @@
 """Bounded metadata transport shared by preparation and lobby prefetching."""
-import json
 import math
 import threading
 import time
@@ -11,6 +10,7 @@ from urllib.parse import urlparse
 import requests
 
 from .engine import GameError
+from . import json_data
 
 JSON_HOSTS = frozenset({"api.animethemes.moe", "myanimelist.net", "openings.moe"})
 MEDIA_PROBE_HOSTS = frozenset({"v.animethemes.moe", "openings.moe"})
@@ -147,9 +147,10 @@ def get_json(url, params=None):
                 raise ResponseTooLarge()
             body = bytearray()
             for chunk in response.iter_content(chunk_size=65536):
+                checkpoint()
                 if len(body) + len(chunk) > MAX_JSON_BYTES:
                     raise ResponseTooLarge()
                 body.extend(chunk)
-            return json.loads(body)
-    except (requests.RequestException, ValueError) as exc:
+            return json_data.loads(body)
+    except (requests.RequestException, ValueError, RecursionError) as exc:
         raise GameError("The music provider could not be reached. Check the host's internet connection or use a local catalog.") from exc

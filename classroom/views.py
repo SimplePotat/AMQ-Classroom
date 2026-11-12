@@ -22,7 +22,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET
 
-from . import engine, library, prefetch
+from . import engine, json_data, library, prefetch
 from .models import Profile, GameResult
 
 ATTEMPTS = defaultdict(deque)
@@ -54,7 +54,7 @@ def body(request):
         raise engine.GameError("Use POST for this action.", 405)
     if request.content_type != "application/json":
         raise engine.GameError("Send a JSON request.", 415)
-    data = json.loads(request.body or b"{}")
+    data = json_data.loads(request.body or b"{}")
     if not isinstance(data, dict):
         raise engine.GameError("Expected a JSON object.")
     return data
@@ -281,6 +281,10 @@ def logout(request):
 @api
 def media(request, round_id):
     require_host(request)
+    if request.method not in ("GET", "HEAD"):
+        response = JsonResponse({"error": "Use GET or HEAD."}, status=405)
+        response["Allow"] = "GET, HEAD"
+        return response
     with engine.room_state() as s:
         song = engine.current(s)
         if not song or song["roundId"] != round_id:
@@ -295,16 +299,21 @@ def media(request, round_id):
     start, end, status = 0, size - 1, 200
     range_header = request.headers.get("Range")
     if range_header:
-        match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
+        match = re.fullmatch(r"bytes=([0-9]*)-([0-9]*)", range_header)
         if not match or not any(match.groups()):
             response = HttpResponse(status=416)
             response["Content-Range"] = f"bytes */{size}"
             return response
         left, right = match.groups()
+        def bounded_index(value):
+            # Valid HTTP decimal ranges can exceed Python's integer-string
+            # limit. Values above the file size have the same range behavior.
+            value = value.lstrip("0") or "0"
+            return size if len(value) > len(str(size)) else min(int(value), size)
         if left:
-            start, end = int(left), min(int(right), size - 1) if right else size - 1
+            start, end = bounded_index(left), min(bounded_index(right), size - 1) if right else size - 1
         else:
-            start = max(0, size - int(right))
+            start = max(0, size - bounded_index(right))
         if start > end or start >= size:
             response = HttpResponse(status=416)
             response["Content-Range"] = f"bytes */{size}"
@@ -352,7 +361,9 @@ def results(request):
         writer = csv.writer(out)
         writer.writerow(["Player", "MAL", "Score", "Round", "Anime", "Song", "Guess", "Correct", "Voided"])
         def safe(value):
-            text = str(value)
+            # Old JSONField records may contain lone surrogates accepted by
+            # earlier releases. Repair only the export, preserving saved data.
+            text = re.sub(r"[\ud800-\udfff]", "\ufffd", str(value))
             return "'" + text if text.lstrip().startswith(("=", "+", "-", "@")) else text
         for key, p in s["players"].items():
             for i, record in enumerate(s["history"]):

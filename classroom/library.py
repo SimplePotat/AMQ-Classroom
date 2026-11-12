@@ -1,6 +1,7 @@
 """MAL/AnimeThemes song pools, with persistent caching and an offline catalog."""
 import json
 import logging
+import math
 import random
 import re
 import secrets
@@ -219,24 +220,53 @@ def openings_details(uid):
     return cached(f"openings:uid:{uid}", OPENINGS_TTL, fetch, model=OpeningsResource)
 
 
+def _records(value):
+    return [record for record in value if isinstance(record, dict)] if isinstance(value, list) else []
+
+
+def _label(value, default=""):
+    return value if isinstance(value, str) and value else default
+
+
+def _usable_video(video):
+    if not isinstance(video.get("link"), str):
+        return False
+    try:
+        target = urlparse(video["link"])
+        if (target.scheme != "https" or not target.hostname or target.username or target.password
+                or target.port not in (None, 443)):
+            return False
+    except ValueError:
+        return False
+    for field in ("resolution", "size"):
+        number = video.get(field)
+        if number is not None:
+            try:
+                if type(number) not in (int, float) or not math.isfinite(number) or number < 0:
+                    return False
+            except OverflowError:
+                return False
+    return True
+
+
 def songs_from_anime(anime, title, options):
     songs = []
-    aliases = [title, *[a["text"] for a in anime.get("animesynonyms", []) if a.get("text")]]
-    for theme in anime.get("animethemes", []):
-        if theme.get("type") not in options["types"]:
+    aliases = [title, *[a["text"] for a in _records(anime.get("animesynonyms")) if _label(a.get("text"))]]
+    for theme in _records(anime.get("animethemes")):
+        if (theme.get("type") not in options["types"] or type(theme.get("id")) is not int or theme["id"] <= 0):
             continue
-        videos = [v for entry in theme.get("animethemeentries", [])
+        videos = [v for entry in _records(theme.get("animethemeentries"))
                   if (options.get("allowNsfw", False) or not entry.get("nsfw"))
                   and (options.get("allowSpoilers", False) or not entry.get("spoiler"))
-                  for v in entry.get("videos", [])
-                  if urlparse(v.get("link", "")).scheme == "https"]
+                  for v in _records(entry.get("videos")) if _usable_video(v)]
         if not videos:
             continue
         # A modest-resolution stream reduces classroom buffering.
         video = min(videos, key=lambda v: (abs((v.get("resolution") or 720) - 480), v.get("size") or 0))
-        song = theme.get("song") or {}
+        song = theme.get("song") if isinstance(theme.get("song"), dict) else {}
         songs.append({"id": f"at-{theme['id']}", "anime": anime["name"], "aliases": aliases,
-            "song": song.get("title") or "Unknown title", "artist": ", ".join(a["name"] for a in song.get("artists", [])) or "Artist not listed",
+            "song": _label(song.get("title"), "Unknown title"),
+            "artist": ", ".join(a["name"] for a in _records(song.get("artists")) if _label(a.get("name"))) or "Artist not listed",
             "type": theme["type"], "year": anime.get("year"), "media": video["link"]})
     return songs
 
@@ -266,12 +296,12 @@ def songs_from_openings(batch, options, limit):
             if ((details.get("nsfw") and not options.get("allowNsfw", False))
                     or (details.get("spoiler") and not options.get("allowSpoilers", False))):
                 continue
-            song = record.get("song") or {}
+            song = record.get("song") if isinstance(record.get("song"), dict) else {}
             aliases = [title]
             if engine.normalize(record["source"]) != engine.normalize(title):
                 aliases.append(record["source"])
             songs.append({"id": f"om-{uid}", "malId": mal_id, "anime": title, "aliases": aliases,
-                "song": song.get("title") or "Unknown title", "artist": song.get("artist") or "Artist not listed",
+                "song": _label(song.get("title"), "Unknown title"), "artist": _label(song.get("artist"), "Artist not listed"),
                 "type": kind, "year": None,
                 "media": f"https://openings.moe/video/{details['file']}.webm"})
             if len(songs) >= limit:

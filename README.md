@@ -181,6 +181,8 @@ Set `PYTHON` if the Python executable is not `.venv/bin/python` (or `.venv\Scrip
 
 The browser regression suite also tests interrupted playback notifications, native full-video endings, pause/resume and reload during reveals, corrupt volume preferences, stale host controls, and settings validation on a phone-sized host screen. The HTTP stress script starts an isolated server with temporary synthetic media and 100 clients using distinct loopback addresses; it checks the roster limit, privacy, exact scores, CSV, and session/answer recovery after restarting the process. Both scripts remove their temporary data.
 
+Additional tests exercise malformed JSON and Unicode, large byte ranges and HEAD requests, corrupt provider metadata, cancellation during streamed responses, and 64 seeded matches with 640 rounds checked against an independent score ledger. The browser network suite covers offline drafts, responses lost after a successful server mutation, delayed guesses, cross-tab account changes, and an unanswered state request. These tests use temporary data and simulated network failures.
+
 The included GitHub Actions workflow runs server checks on Python 3.12/3.13, all browser suites on Chromium, the HTTP stress script, and Python/npm dependency audits. The upstream deployment workflows are restricted to the upstream repository so this fork does not attempt to publish to the original author's servers.
 
 ## Upstream and license
