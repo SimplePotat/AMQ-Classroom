@@ -20,6 +20,13 @@ class CachedResource(models.Model):
     expires_at = models.FloatField()
 
 
+class OpeningsResource(models.Model):
+    """Provider-owned catalog/details, independent of AnimeThemes cache entries."""
+    key = models.CharField(max_length=200, unique=True)
+    value = models.JSONField()
+    expires_at = models.FloatField()
+
+
 class GameResult(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     result = models.JSONField()

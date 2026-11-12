@@ -136,7 +136,13 @@ class AnimeBatchCacheTests(TransactionTestCase):
             self.assertLessEqual(expiry, time.time() + ttl)
 
     def test_concurrent_cache_misses_fetch_once(self):
-        entered, release = threading.Event(), threading.Event()
+        entered, second_missed, release = threading.Event(), threading.Event(), threading.Event()
+        read_cache = library._cached_anime
+        def observe_miss(ids):
+            result = read_cache(ids)
+            if entered.is_set():
+                second_missed.set()
+            return result
         def fetch(url, params):
             entered.set()
             if not release.wait(3):
@@ -147,10 +153,14 @@ class AnimeBatchCacheTests(TransactionTestCase):
                 return library.anime_data_batch([1, 2])
             finally:
                 close_old_connections()
-        with patch("classroom.library.get_json", side_effect=fetch) as request, ThreadPoolExecutor(2) as workers:
+        with patch("classroom.library.get_json", side_effect=fetch) as request, patch(
+                "classroom.library._cached_anime", side_effect=observe_miss), ThreadPoolExecutor(2) as workers:
             first = workers.submit(load)
             self.assertTrue(entered.wait(3))
             second = workers.submit(load)
+            # Exercise two cold misses before the first write. Shared in-memory
+            # SQLite cannot wait for a simultaneous table reader and writer.
+            self.assertTrue(second_missed.wait(3))
             release.set()
             self.assertEqual(first.result(timeout=5), second.result(timeout=5))
         self.assertEqual(request.call_count, 1)
@@ -473,7 +483,7 @@ class OpeningsFallbackTests(TransactionTestCase):
             state.update(phase="loading", loadId="openings")
         with patch("classroom.library.mal_list", return_value=mal_entries(2)), patch(
                 "classroom.library.get_json", side_effect=respond):
-            library.prepare("openings", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+            library.prepare("openings", engine.validate_settings({"source": "mal", "types": ["OP"], "allowOpeningsFallback": True}), ["player_1"])
         state = Room.objects.get(pk=1).state
         self.assertEqual(state["phase"], "ready", state["message"])
         songs = state["queue"]
@@ -499,7 +509,7 @@ class OpeningsFallbackTests(TransactionTestCase):
                 "classroom.library.get_json", side_effect=respond), patch(
                 "classroom.metadata.requests.Session.get") as probe:
             probe.return_value.__enter__.return_value.status_code = 206
-            library.prepare("healthy", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+            library.prepare("healthy", engine.validate_settings({"source": "mal", "types": ["OP"], "allowOpeningsFallback": True}), ["player_1"])
         state = Room.objects.get(pk=1).state
         self.assertEqual(state["phase"], "ready", state["message"])
         self.assertTrue(any(song["id"].startswith("at-") for song in state["queue"]))
@@ -521,7 +531,7 @@ class OpeningsFallbackTests(TransactionTestCase):
             state.update(phase="loading", loadId="broken-details")
         with patch("classroom.library.mal_list", return_value=mal_entries(2)), patch(
                 "classroom.library.get_json", side_effect=respond):
-            library.prepare("broken-details", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+            library.prepare("broken-details", engine.validate_settings({"source": "mal", "types": ["OP"], "allowOpeningsFallback": True}), ["player_1"])
         state = Room.objects.get(pk=1).state
         self.assertEqual(state["phase"], "ready", state["message"])
         self.assertEqual([song["id"] for song in state["queue"]], ["om-Opening1-title-2"])
@@ -541,7 +551,7 @@ class OpeningsFallbackTests(TransactionTestCase):
         with patch("classroom.library.mal_list", return_value=[
             {"anime_id": 3, "anime_title": "Baccano!", "status": 2}]), patch(
                 "classroom.library.get_json", side_effect=respond):
-            library.prepare("baccano", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+            library.prepare("baccano", engine.validate_settings({"source": "mal", "types": ["OP"], "allowOpeningsFallback": True}), ["player_1"])
         state = Room.objects.get(pk=1).state
         self.assertEqual(state["phase"], "ready", state["message"])
         self.assertIn("om-Opening1-baccano", [song["id"] for song in state["queue"]])
@@ -554,7 +564,7 @@ class OpeningsFallbackTests(TransactionTestCase):
             state.update(phase="loading", loadId="both-down")
         with patch("classroom.library.mal_list", return_value=mal_entries(2)), patch(
                 "classroom.library.get_json", side_effect=respond):
-            library.prepare("both-down", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+            library.prepare("both-down", engine.validate_settings({"source": "mal", "types": ["OP"], "allowOpeningsFallback": True}), ["player_1"])
         with engine.room_state() as state:
             self.assertEqual(state["phase"], "lobby")
             self.assertIn("No songs could be loaded from", state["message"])
@@ -575,7 +585,7 @@ class OpeningsFallbackTests(TransactionTestCase):
                 "classroom.library.get_json", side_effect=respond), patch(
                 "classroom.metadata.requests.Session.get") as probe:
             probe.return_value.__enter__.return_value.status_code = 502
-            library.prepare("dead-media", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+            library.prepare("dead-media", engine.validate_settings({"source": "mal", "types": ["OP"], "allowOpeningsFallback": True}), ["player_1"])
         state = Room.objects.get(pk=1).state
         self.assertEqual(state["phase"], "ready", state["message"])
         self.assertTrue(all(song["id"].startswith("om-") for song in state["queue"]), state["queue"])
@@ -597,7 +607,7 @@ class OpeningsFallbackTests(TransactionTestCase):
                 "classroom.library.get_json", side_effect=respond), patch(
                 "classroom.metadata.requests.Session.get") as probe:
             probe.return_value.__enter__.return_value.status_code = 206
-            library.prepare("healthy-media", engine.validate_settings({"source": "mal", "types": ["OP"]}), ["player_1"])
+            library.prepare("healthy-media", engine.validate_settings({"source": "mal", "types": ["OP"], "allowOpeningsFallback": True}), ["player_1"])
         state = Room.objects.get(pk=1).state
         self.assertEqual(state["phase"], "ready", state["message"])
         self.assertTrue(any(song["id"].startswith("at-") for song in state["queue"]))

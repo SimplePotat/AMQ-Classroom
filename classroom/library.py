@@ -14,7 +14,7 @@ from django.conf import settings
 from django.db import close_old_connections
 from . import engine, metadata
 from .engine import GameError, room_state
-from .models import CachedResource
+from .models import CachedResource, OpeningsResource
 from .metadata import get_json
 
 LOG = logging.getLogger(__name__)
@@ -53,17 +53,17 @@ def cache_work():
         CACHE_LOCK.release()
 
 
-def cached(key, seconds, fetch):
+def cached(key, seconds, fetch, *, model=CachedResource):
     metadata.checkpoint()
-    entry = CachedResource.objects.filter(key=key, expires_at__gt=time.time()).first()
+    entry = model.objects.filter(key=key, expires_at__gt=time.time()).first()
     if entry:
         return entry.value
     with cache_work():
-        entry = CachedResource.objects.filter(key=key, expires_at__gt=time.time()).first()
+        entry = model.objects.filter(key=key, expires_at__gt=time.time()).first()
         if entry:
             return entry.value
         value = fetch()
-        CachedResource.objects.update_or_create(key=key, defaults={"value": value, "expires_at": time.time() + seconds})
+        model.objects.update_or_create(key=key, defaults={"value": value, "expires_at": time.time() + seconds})
         return value
 
 
@@ -206,7 +206,7 @@ def openings_catalog():
             for key in _openings_keys(record["source"]):
                 catalog.setdefault(key, []).append(record)
         return catalog
-    return cached("openings:catalog", OPENINGS_TTL, fetch)
+    return cached("openings:catalog", OPENINGS_TTL, fetch, model=OpeningsResource)
 
 
 def openings_details(uid):
@@ -216,7 +216,7 @@ def openings_details(uid):
         if not isinstance(data, dict) or not isinstance(data.get("file"), str):
             raise GameError("The music provider returned invalid anime data.")
         return data
-    return cached(f"openings:uid:{uid}", OPENINGS_TTL, fetch)
+    return cached(f"openings:uid:{uid}", OPENINGS_TTL, fetch, model=OpeningsResource)
 
 
 def songs_from_anime(anime, title, options):
@@ -403,12 +403,13 @@ def _prepare(load_id, options, usernames):
                     if not load_errors:
                         load_errors.append(str(exc))
                     warnings.extend(title for _, title in batch)
-                    try:
-                        songs.extend(songs_from_openings(batch, options, max(30, options["rounds"] * 3) - len(songs)))
-                    except GameError as fallback_exc:
-                        LOG.warning("Fallback lookup failed: %s", fallback_exc)
-                        if not load_errors:
-                            load_errors.append(str(fallback_exc))
+                    if options.get("allowOpeningsFallback"):
+                        try:
+                            songs.extend(songs_from_openings(batch, options, max(30, options["rounds"] * 3) - len(songs)))
+                        except GameError as fallback_exc:
+                            LOG.warning("Fallback lookup failed: %s", fallback_exc)
+                            if not load_errors:
+                                load_errors.append(str(fallback_exc))
         songs = list({song["id"]: song for song in songs}.values())
         if not songs:
             if load_errors:
@@ -431,7 +432,9 @@ def _prepare(load_id, options, usernames):
             seen_shows.add(show)
             queue.append(song)
         for i, song in enumerate(queue):
-            if not song["media"].startswith("https://") or metadata.media_playable(song["media"]):
+            if (not options.get("allowOpeningsFallback")
+                    or urlparse(song["media"]).hostname != "v.animethemes.moe"
+                    or metadata.media_playable(song["media"])):
                 continue
             try:
                 replacement = _openings_replacement(song, options)

@@ -18,7 +18,8 @@ DEFAULTS = {
     "rounds": 10, "guessSeconds": 20, "revealSeconds": 12,
     "types": ["OP", "ED"], "statuses": [1, 2], "source": "starter",
     "autoAdvance": False, "randomStart": True, "fullReveal": False,
-    "preferOpenings": False, "allowNsfw": False, "allowSpoilers": False,
+    "preferOpenings": False, "allowOpeningsFallback": False,
+    "allowNsfw": False, "allowSpoilers": False,
 }
 
 
@@ -145,7 +146,7 @@ def validate_settings(data):
     settings["source"] = data.get("source", "starter")
     if settings["source"] not in ["starter", "mal", "local"]:
         raise GameError("Choose a valid song source.")
-    for name in ["autoAdvance", "randomStart", "fullReveal", "preferOpenings", "allowNsfw", "allowSpoilers"]:
+    for name in ["autoAdvance", "randomStart", "fullReveal", "preferOpenings", "allowOpeningsFallback", "allowNsfw", "allowSpoilers"]:
         value = data.get(name, settings[name])
         if type(value) is not bool:
             raise GameError(f"Invalid {name} setting.")
