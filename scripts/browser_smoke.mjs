@@ -59,6 +59,15 @@ try {
   await host.getByRole('heading',{name:'Set the stage.'}).waitFor();
   await register(player,'Yuki','yuki_list','Sakura');
   await register(second,'Kai','kai_list','Wave');
+  const enlargeQr=host.getByRole('button',{name:'Enlarge QR code',exact:true});
+  const qrDialog=host.getByRole('dialog',{name:'Scan to join this classroom',exact:true});
+  const shrinkQr=qrDialog.getByRole('button',{name:'Shrink QR code',exact:true});
+  assert.equal(await player.getByRole('button',{name:'Enlarge QR code'}).count(),0,'Player portal shows a host display control');
+  await enlargeQr.click();
+  await qrDialog.waitFor();
+  await host.waitForFunction(()=>document.querySelector('#qr-dialog img').complete && document.querySelector('#qr-dialog img').naturalWidth>0);
+  assert.equal(await shrinkQr.evaluate(button=>button===document.activeElement),true,'Expanded QR did not focus its close button');
+  assert.equal(await host.locator('#large-qr-address').textContent(),base.replace(/^https?:\/\//,''));
   // Additional persistent profiles make the classroom preview representative.
   for(const [name,avatar] of [['Hana',2],['Ren',3],['Aoi',6],['Sora',7]]){
     const context=await browser.newContext(), page=await context.newPage();
@@ -69,11 +78,41 @@ try {
   }
   await waitState(host,s=>s.players.length===6);
   await delay(1200);
+  assert.equal(await qrDialog.isVisible(),true,'Player joins or regular polling dismissed the expanded QR');
+  for(const viewport of [{width:390,height:844},{width:844,height:390},{width:1440,height:1000}]){
+    await host.setViewportSize(viewport);
+    const bounds=await qrDialog.evaluate(dialog=>{
+      const box=dialog.getBoundingClientRect(), qr=dialog.querySelector('img').getBoundingClientRect();
+      const close=dialog.querySelector('button').getBoundingClientRect(), address=dialog.querySelector('p').getBoundingClientRect();
+      return {width:box.width,height:box.height,qr:{x:qr.x,y:qr.y,width:qr.width,height:qr.height},
+        closeBottom:close.bottom,addressBottom:address.bottom,overflow:dialog.scrollHeight>dialog.clientHeight};
+    });
+    assert.equal(bounds.width,viewport.width,'QR view does not fill the viewport width');
+    assert.equal(bounds.height,viewport.height,'QR view does not fill the viewport height');
+    assert.ok(Math.abs(bounds.qr.width-bounds.qr.height)<1,'Expanded QR is distorted');
+    assert.ok(bounds.qr.width>Math.min(viewport.width,viewport.height)*0.6,'Expanded QR is too small');
+    assert.ok(bounds.qr.x>=0 && bounds.qr.y>=0 && bounds.qr.x+bounds.qr.width<=viewport.width &&
+      bounds.qr.y+bounds.qr.height<=viewport.height && bounds.closeBottom<=viewport.height && bounds.addressBottom<=viewport.height,'QR or its controls leave the screen');
+    assert.equal(bounds.overflow,false,'Expanded QR view needs scrolling');
+  }
+  await host.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  await host.screenshot({path:join(output,'host-qr-expanded.png')});
+  await shrinkQr.click();
+  assert.equal(await qrDialog.isVisible(),false);
+  assert.equal(await enlargeQr.evaluate(button=>button===document.activeElement),true,'Shrinking did not return focus to the room');
+  await enlargeQr.click();
+  await host.keyboard.press('Escape');
+  assert.equal(await qrDialog.isVisible(),false,'Escape did not dismiss the QR view');
   assert.equal(await host.locator('body').evaluate(el=>el.scrollWidth<=innerWidth),true,'Host layout overflows');
   await host.screenshot({path:join(output,'host-lobby.png'),fullPage:true});
   await host.getByRole('button',{name:'Whiteboard',exact:false}).click();
   assert.equal(await host.locator('body').evaluate(el=>el.classList.contains('whiteboard')),true);
   await host.screenshot({path:join(output,'host-whiteboard.png')});
+  const fullscreenBeforeQr=await host.evaluate(()=>!!document.fullscreenElement);
+  await enlargeQr.click();
+  await shrinkQr.click();
+  assert.equal(await host.locator('body').evaluate(el=>el.classList.contains('whiteboard')),true,'Shrinking QR exited whiteboard mode');
+  assert.equal(await host.evaluate(()=>!!document.fullscreenElement),fullscreenBeforeQr,'Shrinking QR exited browser fullscreen');
   await host.getByRole('button',{name:'Exit whiteboard',exact:false}).click();
   await host.getByRole('button',{name:'Quiz settings',exact:false}).click();
   const nsfwFilter=host.getByLabel('Filter NSFW videos',{exact:true});
@@ -137,8 +176,13 @@ try {
   const noFallbackPool=await waitState(host,s=>s.phase==='ready');
   assert.equal(noFallbackPool.settings.preferOpenings,false);
   assert.equal(noFallbackPool.settings.allowOpeningsFallback,false);
-  await host.getByRole('button',{name:'Start quiz'}).click();
+  await host.getByRole('button',{name:'Start quiz'}).waitFor();
+  await enlargeQr.click();
+  // Starting from another host tab must not leave its QR overlay over the video.
+  assert.equal((await api(host,'/api/host',{action:'start'})).status,200);
   let game=await waitState(host,s=>s.phase==='guess');
+  assert.equal(await qrDialog.isVisible(),false,'Quiz start left the large QR view over playback');
+  assert.equal(await enlargeQr.count(),0,'QR enlargement is offered during a live quiz');
   const leak=await api(player,'/api/state');
   assert.equal(leak.data.answer,null);assert.equal(leak.data.mediaUrl,undefined);
   const video=host.locator('video');
@@ -233,7 +277,7 @@ try {
   const finishedGame=await waitState(host,s=>s.phase==='finished');
   assert.equal(finishedGame.history.length,1,'Playback-driven advance did not finish the game');
   assert.deepEqual(errors,[],`Browser errors: ${errors.join(', ')}`);
-  console.log(`PASS: six profiles, host + phone + desktop, real audio${videoFixture?' and decoded video':''}, whiteboard, pause/resume, draft preservation and account isolation, reconnect, automatic scoring/reveal, full-video reveal with host-exclusive controls, stale-answer rejection, CSV, reusable MAL profile, responsive layout.`);
+  console.log(`PASS: six profiles, host + phone + desktop, real audio${videoFixture?' and decoded video':''}, whiteboard, fullscreen QR expand/shrink, pause/resume, draft preservation and account isolation, reconnect, automatic scoring/reveal, full-video reveal with host-exclusive controls, stale-answer rejection, CSV, reusable MAL profile, responsive layout.`);
   console.log(`Screenshots: ${output}`);
 }catch(error){
   console.error(logs);throw error;

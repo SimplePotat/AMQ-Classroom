@@ -36,6 +36,8 @@ Keep the terminal open. It prints the **player URL** and a private **host key**.
 5. Players submit an anime title. They can revise it until the server closes the round. One correct answer earns one point, regardless of speed.
 6. The video and answer appear, scores update, and the host can review answers before continuing. Enable **Play each revealed video in full from the start** in quiz settings to restart at 0:00 and play through to the end. **Whiteboard** opens a larger, fullscreen-friendly display.
 
+While waiting for players, click **Enlarge QR code** beside the host's join link to fill the display with the code and join address. **Shrink QR code** or **Escape** returns to the room. The enlarged view also works in Whiteboard mode and closes automatically when the quiz starts. [Preview the enlarged QR view](docs/host-qr-expanded.png).
+
 Full-video reveals override the reveal timer. With **Advance automatically** enabled, the host screen reports when playback ends and the next song starts then; otherwise, the host chooses **Next song**. Pause/resume works during the full reveal. Only the host can skip, void, advance, or finish a song, including through the API; players have no skip or advance controls. The host can advance early during a full reveal. Leave this setting off to keep the normal reveal timer.
 
 Use **Results CSV** at the end to save standings and round-by-round answers. **Play again** keeps the group and their profiles.
@@ -62,7 +64,7 @@ By default, HTTP requests must use a literal IP address or `localhost`. To use a
 | Settings | 1–100 songs, OP/ED selection, MAL statuses, 5–90 second guesses, timed or full-video reveals, independent NSFW/spoiler filters, random clip starts, opt-in openings.moe pools/fallback, optional automatic advance |
 | Guessing | Live, scrollable title suggestions from cached MAL entries, keyboard/touch selection, alternative English/romaji/Japanese names where available, case/accent/punctuation normalization, revisions until the deadline |
 | Scoring | Server-controlled deadlines, one point per correct anime, tied ranks, private guesses before reveal, host corrections, no-score skips |
-| Host display | Audio-only guessing, video reveal, live leaderboard, QR join link, volume, pause/resume, whiteboard mode |
+| Host display | Audio-only guessing, video reveal, live leaderboard, expandable QR join code, volume, pause/resume, whiteboard mode |
 | Recovery | Saved submitted answers on refresh; interrupted games pause on server restart; unfinished preparation can be retried |
 | Results | Persistent current game and completed-game records; CSV export of the current game |
 

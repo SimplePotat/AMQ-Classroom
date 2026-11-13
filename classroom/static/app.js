@@ -116,7 +116,9 @@ function renderRoom() {
   const s = state, inLobby = ['lobby','loading','ready'].includes(s.phase), me = s.players.find(p => p.id === s.me?.id);
   const subtitle = s.phase === 'finished' || inLobby ? '' : 'Listen closely. You know this one.';
   html('#page-heading', `<div><span class="eyebrow">${hostView ? 'YOUR ROOM · HOST DESK' : 'YOUR ROOM · PLAYER SEAT'}</span><h1>${s.phase === 'finished' ? 'That’s a wrap.' : inLobby ? (hostView ? 'Set the stage.' : 'You’re in good company.') : `Song ${s.round} <span class="muted">/ ${s.total}</span>`}</h1>${subtitle ? `<p>${subtitle}</p>` : ''}</div>${hostView ? `<div class="heading-tools"><button class="button secondary" id="settings-button" ${!inLobby && s.phase !== 'finished' ? 'disabled' : ''}>☷ Quiz settings</button><button class="button ghost" id="whiteboard-button">⛶ ${document.body.classList.contains('whiteboard') ? 'Exit whiteboard' : 'Whiteboard'}</button></div>` : `<button class="profile-mini" id="profile-button">${avatar(s.me.avatar)}<span><strong>${esc(s.me.name)}</strong><small>Edit profile ↗</small></span></button>`}`);
-  html('#join-panel', `<div class="qr"><img src="/api/qr" alt="Scan to join this classroom"></div><div><span class="eyebrow">THE ROOM IS OPEN</span><div class="join-address">${esc(s.joinUrl.replace(/^https?:\/\//,''))}</div><button class="copy-link" id="copy-link">Copy join link ↗</button></div>`);
+  html('#join-panel', `<div class="qr"><img src="/api/qr" alt="Scan to join this classroom"></div><div><span class="eyebrow">THE ROOM IS OPEN</span><div class="join-address">${esc(s.joinUrl.replace(/^https?:\/\//,''))}</div><div class="join-actions"><button class="copy-link" id="copy-link">Copy join link ↗</button>${hostView && inLobby ? '<button class="button secondary small" id="enlarge-qr" aria-haspopup="dialog" aria-controls="qr-dialog">Enlarge QR code</button>' : ''}</div></div>`);
+  $('#large-qr-address').textContent = s.joinUrl.replace(/^https?:\/\//,'');
+  if (!inLobby && $('#qr-dialog').open) $('#qr-dialog').close();
   $('#board-count').textContent = `${s.players.length} PLAYERS`;
   html('#board', s.players.length ? s.players.map(p => `<div class="player-row ${p.id === s.me?.id ? 'me' : ''}"><span class="rank">${inLobby ? '·' : String(p.rank).padStart(2,'0')}</span>${avatar(p.avatar)}<div class="player-identity"><div class="player-name">${esc(p.name)}${p.id === s.me?.id ? ' <span class="muted">(you)</span>' : ''}</div><div class="player-detail">${p.spectator ? 'Spectating · next game' : !p.online ? 'Reconnecting…' : inLobby ? p.ready ? '● Ready to play' : 'In the room' : p.result ? p.result.correct ? '✓ Correct answer' : '— Not this time' : p.submitted ? '✓ Answer received' : 'Listening…'}</div></div><div class="player-score">${p.score}<small>PTS</small></div></div>`).join('') : '<div class="empty-board"><div class="empty-icon">♧</div><p>Players will appear here when they join.<br>Share the link or scan the QR code.</p></div>');
   const labels = {lobby:'WAITING FOR PLAYERS',loading:'BUILDING YOUR PLAYLIST',ready:'READY TO PLAY',buffering:'GETTING THE MUSIC READY',guess:'GUESS THE ANIME',reveal:'THE REVEAL',finished:'FINAL STANDINGS'};
@@ -353,6 +355,9 @@ document.addEventListener('click', async event => {
       picker.querySelectorAll('button').forEach(b=>{b.classList.toggle('selected',b===button);b.setAttribute('aria-pressed',String(b===button));});
     }
     if (button.id==='help-button') $('#help-dialog').showModal();
+    if (button.id==='enlarge-qr' && hostView && state?.host && ['lobby','loading','ready'].includes(state.phase)) {
+      if (!$('#qr-dialog').open) $('#qr-dialog').showModal();
+    }
     if (['settings-button','settings-button-inline'].includes(button.id)) openSettings();
     if (button.id==='profile-button') openProfile();
     if (button.id==='ready-button') await playerAction('ready');
