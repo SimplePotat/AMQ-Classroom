@@ -1037,7 +1037,75 @@ footer b {
 
 .guess-form {
   display:flex;
-  gap:10px
+  gap:10px;
+  align-items:flex-start
+}
+
+.guess-autocomplete {
+  flex:1;
+  width:100%;
+  min-width:0
+}
+
+.guess-autocomplete input {
+  width:100%
+}
+
+.guess-suggestions {
+  position:fixed;
+  z-index:30;
+  display:flex;
+  flex-direction:column;
+  border:1px solid #587a79;
+  border-radius:12px;
+  background:#182637;
+  box-shadow:0 12px 32px #0008;
+  overflow:hidden
+}
+
+.guess-options {
+  position:relative;
+  list-style:none;
+  margin:0;
+  padding:5px;
+  overflow-y:auto;
+  min-height:0;
+  overscroll-behavior:contain;
+  touch-action:pan-y;
+  scrollbar-width:thin;
+  scrollbar-color:#5a827b #182637
+}
+
+.guess-options [role="option"] {
+  display:flex;
+  align-items:center;
+  min-height:44px;
+  padding:10px 12px;
+  border-radius:7px;
+  font-size:14px;
+  line-height:1.45;
+  overflow-wrap:anywhere;
+  cursor:pointer
+}
+
+.guess-options [aria-selected="true"] {
+  background:#2d5049;
+  color:var(--mint);
+  box-shadow:inset 3px 0 var(--mint)
+}
+
+@media(hover:hover) {
+  .guess-options [role="option"]:hover {
+    background:#283e4b
+  }
+}
+
+.suggestion-status {
+  flex:none;
+  border-top:1px solid var(--line);
+  padding:8px 12px;
+  font-size:11px;
+  color:var(--muted)
 }
 
 .guess-form input {

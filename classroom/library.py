@@ -13,7 +13,7 @@ from urllib.parse import quote, urlparse
 
 from django.conf import settings
 from django.db import close_old_connections
-from . import engine, metadata
+from . import engine, metadata, title_catalog
 from .engine import GameError, room_state
 from .models import CachedResource, OpeningsResource
 from .metadata import get_json
@@ -65,6 +65,8 @@ def cached(key, seconds, fetch, *, model=CachedResource):
             return entry.value
         value = fetch()
         model.objects.update_or_create(key=key, defaults={"value": value, "expires_at": time.time() + seconds})
+        if model is CachedResource:
+            title_catalog.invalidate()
         return value
 
 
@@ -147,6 +149,7 @@ def _load_anime_batch(mal_ids):
                        expires_at=now + (ANIME_TTL if anime else MISSING_ANIME_TTL))
         for mal_id, anime in found.items()
     ], update_conflicts=True, unique_fields=["key"], update_fields=["value", "expires_at"])
+    title_catalog.invalidate()
     return found
 
 

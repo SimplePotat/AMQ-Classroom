@@ -2,6 +2,6 @@
   "name": "anime-quiz-classroom-qa",
   "private": true,
   "description": "Optional browser QA only. The classroom app itself needs Python, not Node.",
-  "scripts": {"test:browser": "node scripts/browser_smoke.mjs && node scripts/browser_regressions.mjs && node scripts/browser_network_faults.mjs"},
+  "scripts": {"test:browser": "node scripts/browser_smoke.mjs && node scripts/browser_regressions.mjs && node scripts/browser_network_faults.mjs && node scripts/browser_autocomplete.mjs"},
   "devDependencies": {"playwright": "1.62.1"}
 }

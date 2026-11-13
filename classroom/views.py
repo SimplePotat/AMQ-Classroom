@@ -22,7 +22,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET
 
-from . import engine, json_data, library, prefetch
+from . import engine, json_data, library, prefetch, title_catalog
 from .models import Profile, GameResult
 
 ATTEMPTS = defaultdict(deque)
@@ -122,9 +122,18 @@ def index(request):
 
 @require_GET
 def asset(request, filename):
-    if filename not in {"app.js", "style.css", "mark.svg"}:
+    if filename not in {"app.js", "autocomplete.js", "style.css", "mark.svg"}:
         return HttpResponse(status=404)
     return FileResponse((Path(__file__).parent / "static" / filename).open("rb"), content_type=mimetypes.guess_type(filename)[0])
+
+
+@api
+def anime_titles(request):
+    if request.method != "GET":
+        raise engine.GameError("Use GET.", 405)
+    if not is_host(request):
+        require_profile(request)
+    return {"titles": title_catalog.titles()}
 
 
 @api

@@ -11,6 +11,8 @@ let serverOffset = 0, connected = false, mediaRound = null, playingRound = null,
 let cardKey = '', toastTimer, fullRevealRound = null, revealEndRequested = null;
 const drafts = new Map();
 let draftOwner = null;
+const autocomplete = new AnimeAutocomplete();
+let cachedTitles = [], poolTitlesKey = '', titlePhase = '', nextTitleRefresh = 0, titleRequest = null;
 
 function avatar(index, cls = '') {
   const [light, dark] = palettes[index % palettes.length] || palettes[0];
@@ -28,7 +30,7 @@ function csrf() { return document.cookie.split('; ').find(c => c.startsWith('csr
 async function request(path, data) {
   // A lost state response must not keep busyPoll set forever. Mutations retain
   // their normal lifetime: timing one out cannot tell us whether it committed.
-  const controller = path === '/api/state' ? new AbortController() : null;
+  const controller = ['/api/state','/api/anime-titles'].includes(path) ? new AbortController() : null;
   const timeout = controller ? setTimeout(()=>controller.abort(),8000) : null;
   try {
     const response = await fetch(path, {method:data ? 'POST' : 'GET', credentials:'same-origin', cache:'no-store',
@@ -77,6 +79,9 @@ function render() {
     drafts.clear();
     draftOwner = nextDraftOwner;
     cardKey = '';
+    autocomplete.bind(null);
+    autocomplete.setTitles([]);
+    cachedTitles = []; poolTitlesKey = ''; titlePhase = ''; nextTitleRefresh = 0; titleRequest = null;
     // Another tab can sign out or switch accounts while this editor is open.
     $('#profile-dialog').close();
     $('#profile-dialog').innerHTML = '';
@@ -86,6 +91,7 @@ function render() {
   $('#source-link').href = state.sourceUrl;
   const nextShell = hostView ? (state.host ? 'host-room' : 'host-auth') : (state.me ? 'player-room' : 'player-auth');
   if (nextShell !== shell) {
+    autocomplete.bind(null);
     document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());
     shell = nextShell; cardKey = ''; mediaRound = null; playingRound = null; fullRevealRound = null; revealEndRequested = null;
     if (shell.endsWith('auth')) renderAuth(); else renderRoomShell();
@@ -102,7 +108,7 @@ function renderAuth() {
 }
 
 function renderRoomShell() {
-  app.innerHTML = `<div class="page-heading" id="page-heading"></div><div class="room-grid"><section class="room-main"><div class="stage" id="stage"><div class="stage-top" id="stage-top"></div>${hostView ? '<video id="round-video" class="round-video hidden-video" playsinline preload="auto" disablepictureinpicture></video>' : ''}<div id="stage-content"></div><div class="stage-bottom" id="stage-bottom"></div><div class="timer-progress" id="timer-progress" hidden><span></span></div>${hostView ? '<div class="media-alert" id="media-alert" hidden><span id="media-message"></span><button class="button small" id="enable-audio">Enable / resume audio</button></div>' : ''}</div>${hostView ? `<div class="audio-tools"><button class="text-button" id="mute-button" aria-label="Mute audio">♫ Sound on</button><label for="volume">Volume</label><input type="range" id="volume" min="0" max="1" step="0.05" value="0.7"><span>Audio plays on this screen</span><button class="text-button" id="host-logout">Sign out</button></div>` : ''}<div id="answer"></div><div id="controls"></div><div id="player-card"></div><div id="room-meta"></div><p class="status-text" id="room-status" role="status"></p><div id="roster"></div><div id="reviews"></div><div id="history"></div></section><aside class="room-side"><section class="panel join-panel" id="join-panel"></section><section class="panel leaderboard"><div class="panel-heading"><h2>Leaderboard</h2><span class="badge" id="board-count"></span></div><div class="leaderboard-list" id="board"></div></section></aside></div><datalist id="anime-titles"></datalist>`;
+  app.innerHTML = `<div class="page-heading" id="page-heading"></div><div class="room-grid"><section class="room-main"><div class="stage" id="stage"><div class="stage-top" id="stage-top"></div>${hostView ? '<video id="round-video" class="round-video hidden-video" playsinline preload="auto" disablepictureinpicture></video>' : ''}<div id="stage-content"></div><div class="stage-bottom" id="stage-bottom"></div><div class="timer-progress" id="timer-progress" hidden><span></span></div>${hostView ? '<div class="media-alert" id="media-alert" hidden><span id="media-message"></span><button class="button small" id="enable-audio">Enable / resume audio</button></div>' : ''}</div>${hostView ? `<div class="audio-tools"><button class="text-button" id="mute-button" aria-label="Mute audio">♫ Sound on</button><label for="volume">Volume</label><input type="range" id="volume" min="0" max="1" step="0.05" value="0.7"><span>Audio plays on this screen</span><button class="text-button" id="host-logout">Sign out</button></div>` : ''}<div id="answer"></div><div id="controls"></div><div id="player-card"></div><div id="room-meta"></div><p class="status-text" id="room-status" role="status"></p><div id="roster"></div><div id="reviews"></div><div id="history"></div></section><aside class="room-side"><section class="panel join-panel" id="join-panel"></section><section class="panel leaderboard"><div class="panel-heading"><h2>Leaderboard</h2><span class="badge" id="board-count"></span></div><div class="leaderboard-list" id="board"></div></section></aside></div>`;
   if (hostView) setupVideo();
 }
 
@@ -141,10 +147,33 @@ function renderRoom() {
   html('#roster', inLobby && s.players.length ? `<section class="roster"><div class="section-label"><span>IN THE ROOM</span><span>${s.players.filter(p=>p.ready).length} READY</span></div><div class="roster-list">${s.players.map(p=>`<div class="roster-chip">${avatar(p.avatar)}<span>${esc(p.name)}</span><span class="dot ${p.ready?'':'offline-dot'}"></span>${hostView ? `<button class="text-button" data-remove="${p.id}" aria-label="Remove ${esc(p.name)} from room">×</button>` : ''}</div>`).join('')}</div></section>` : '');
   html('#reviews', s.phase === 'reveal' && hostView ? `<div class="answer-reviews">${s.players.filter(p=>p.result).map(p=>`<div class="answer-review ${p.result.correct?'correct':''}"><div class="review-name"><span>${esc(p.name)}</span><span>${p.result.correct?'✓ +1':'— 0'}</span></div><strong>${esc(p.result.guess || 'No answer submitted')}</strong><button class="review-action" data-correct="${p.id}">${p.result.correct ? 'Mark incorrect' : 'Accept answer'}${p.result.reviewed ? ' · reviewed' : ''}</button></div>`).join('')}</div>` : '');
   html('#history', s.phase === 'finished' ? `<section class="panel history-panel"><h3>The setlist</h3>${s.history.map((h,i)=>`<div class="history-row"><span>${String(i+1).padStart(2,'0')}</span><strong>${esc(h.anime)}</strong><span>${h.void?'Skipped · no score':esc(h.song)}</span></div>`).join('')}</section>` : '');
-  const titlesKey = JSON.stringify(s.titles);
-  if ($('#anime-titles').dataset.key !== titlesKey) { html('#anime-titles',s.titles.map(t=>`<option value="${esc(t)}"></option>`).join('')); $('#anime-titles').dataset.key = titlesKey; }
+  if (!hostView) refreshAnimeTitles();
   if (hostView) syncVideo();
   updateTimer();
+}
+
+function refreshAnimeTitles() {
+  const key = JSON.stringify(state.titles);
+  if (poolTitlesKey !== key) {
+    poolTitlesKey = key;
+    autocomplete.setTitles([...cachedTitles, ...state.titles]);
+  }
+  // Refresh after preparation and periodically while lobby warming populates
+  // the database. No requests are tied to what a player types.
+  if (titlePhase !== state.phase && ['ready','guess'].includes(state.phase)) nextTitleRefresh = 0;
+  titlePhase = state.phase;
+  if (titleRequest || Date.now() < nextTitleRefresh) return;
+  const requestId = {};
+  titleRequest = requestId;
+  nextTitleRefresh = Date.now() + 60000;
+  request('/api/anime-titles').then(result => {
+    if (titleRequest !== requestId) return; // A different account owns the page.
+    cachedTitles = Array.isArray(result.titles) ? result.titles : [];
+    autocomplete.setTitles([...cachedTitles, ...(state.titles || [])]);
+  }).catch(() => {
+    // Keep typed answers and the available local/pool titles usable offline.
+    if (titleRequest === requestId) nextTitleRefresh = Date.now() + 15000;
+  }).finally(() => { if (titleRequest === requestId) titleRequest = null; });
 }
 
 function renderHostControls() {
@@ -169,11 +198,12 @@ function renderPlayerCard(me) {
     if (!me) content = '<section class="panel player-lobby"><div><h3>You’re signed in.</h3><p>Join the room when you’re ready to play.</p></div><button class="button" id="rejoin-button">Join room →</button></section>';
     else if (me.spectator && s.phase !== 'finished') content='<section class="panel player-lobby"><div><h3>You have a front-row seat.</h3><p>This quiz has started. Watch along and you’ll play in the next one.</p></div><span class="badge pink">SPECTATOR</span></section>';
     else if (['lobby','loading','ready'].includes(s.phase)) content=`<section class="panel player-lobby">${avatar(s.me.avatar)}<div><h3>${me.ready?'You’re ready to play.':'All settled in?'}</h3><p>${me.ready?'Keep this screen open. The host will start the music.':'Let the host know you’re ready for the first song.'}</p></div><button class="button ${me.ready?'secondary':''}" id="ready-button">${me.ready?'✓ Ready · undo':'I’m ready →'}</button></section>`;
-    else if (s.phase === 'guess') content=`<section class="panel player-guess"><form id="guess-form"><label for="guess-input">Your anime guess</label><div class="guess-form"><input id="guess-input" name="guess" type="text" list="anime-titles" maxlength="200" placeholder="Start typing an anime title…" autocomplete="off" value="${esc(drafts.get(s.roundId) ?? s.myGuess)}" ${s.paused?'disabled':''} required><button class="button" type="submit" ${s.paused?'disabled':''}>Send answer ↗</button></div><p class="guess-feedback" id="guess-feedback" aria-live="polite"></p></form></section>`;
+    else if (s.phase === 'guess') content=`<section class="panel player-guess"><form id="guess-form"><label for="guess-input">Your anime guess</label><div class="guess-form"><div class="guess-autocomplete"><input id="guess-input" name="guess" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="guess-options" aria-describedby="guess-feedback" maxlength="200" placeholder="Start typing an anime title…" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(drafts.get(s.roundId) ?? s.myGuess)}" ${s.paused?'disabled':''} required><div id="guess-suggestions" class="guess-suggestions" hidden><ul id="guess-options" class="guess-options" role="listbox" aria-label="Anime titles"></ul><p id="guess-suggestion-status" class="suggestion-status" role="status" aria-live="polite" aria-atomic="true"></p></div></div><button class="button" type="submit" ${s.paused?'disabled':''}>Send answer ↗</button></div><p class="guess-feedback" id="guess-feedback" aria-live="polite"></p></form></section>`;
     else if (s.phase === 'buffering') content='<section class="panel player-lobby"><div><h3>Eyes off the board. Ears on the music.</h3><p>Your answer box opens as soon as the audio starts.</p></div></section>';
     else if (s.phase === 'reveal' && me.result) content=`<section class="result-banner ${me.result.correct?'':'incorrect'}"><h3>${me.result.correct?'✧ You know your anime. +1 point!':'A new song for your playlist.'}</h3><p>${me.result.guess?`Your answer: ${esc(me.result.guess)}`:'No answer was submitted this round.'}${me.result.reviewed?' · Reviewed by the host':''}</p></section>`;
     else if (s.phase === 'finished') content=`<section class="panel player-lobby"><div><h3>${me.score} correct ${me.score===1?'answer':'answers'}. Nicely played.</h3><p>Your profile is saved. Stay here for the next game.</p></div><span class="badge gold">RANK ${me.rank}</span></section>`;
     html('#player-card', content);
+    autocomplete.bind($('#guess-input'));
     if (s.phase === 'guess' && !s.paused && !me?.spectator) setTimeout(()=>$('#guess-input')?.focus({preventScroll:true}),50);
   }
   if ($('#guess-feedback') && connected) $('#guess-feedback').textContent = s.paused ? 'Round paused. Your last submitted answer is saved.' : s.myGuess ? `✓ Received: ${s.myGuess}. You can still change it.` : 'English and romaji titles work. Press Enter to submit.';
@@ -191,6 +221,7 @@ function updateTimer() {
   if (bar) bar.style.width = `${Math.min(100,remaining()/state.settings.guessSeconds*100)}%`;
   const submit = $('#guess-form button[type="submit"]');
   if (submit) submit.disabled = state.paused || !connected || remaining() <= 0;
+  if (state.phase !== 'guess' || state.paused || remaining() <= 0) autocomplete.close();
 }
 
 function mediaAlert(message) { $('#media-message').textContent = message; $('#media-alert').hidden = false; }
@@ -374,6 +405,7 @@ document.addEventListener('input', event => {
 document.addEventListener('submit', async event => {
   const form=event.target;
   if (!['auth-form','guess-form','settings-form','profile-form'].includes(form.id)) return;
+  if (form.id === 'guess-form' && autocomplete.composing) { event.preventDefault(); return; }
   event.preventDefault(); const data=new FormData(form), submit=$('button[type="submit"]',form); submit.disabled=true;
   try {
     if (form.id==='auth-form') {
@@ -382,6 +414,7 @@ document.addEventListener('submit', async event => {
       await poll();
     }
     if (form.id==='guess-form') {
+      autocomplete.close();
       if (!connected) throw new Error('Reconnect to the classroom before submitting.');
       await playerAction('guess',{text:data.get('guess'),roundId:state.roundId});
       toast('Answer received. You can revise it until time is up.');

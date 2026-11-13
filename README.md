@@ -60,13 +60,23 @@ By default, HTTP requests must use a literal IP address or `localhost`. To use a
 | Multiplayer | Shared room, ready status, presence, late-join spectators, reconnects, up to 100 roster entries |
 | Song pools | Starter collection, union of participating players' public MAL lists, or a local media catalog |
 | Settings | 1–100 songs, OP/ED selection, MAL statuses, 5–90 second guesses, timed or full-video reveals, independent NSFW/spoiler filters, random clip starts, opt-in openings.moe pools/fallback, optional automatic advance |
-| Guessing | Title autocomplete, alternative English/romaji/Japanese names where available, case/accent/punctuation normalization, revisions until the deadline |
+| Guessing | Live, scrollable title suggestions from cached MAL entries, keyboard/touch selection, alternative English/romaji/Japanese names where available, case/accent/punctuation normalization, revisions until the deadline |
 | Scoring | Server-controlled deadlines, one point per correct anime, tied ranks, private guesses before reveal, host corrections, no-score skips |
 | Host display | Audio-only guessing, video reveal, live leaderboard, QR join link, volume, pause/resume, whiteboard mode |
 | Recovery | Saved submitted answers on refresh; interrupted games pause on server restart; unfinished preparation can be retried |
 | Results | Persistent current game and completed-game records; CSV export of the current game |
 
 This implements the core AMQ-style quiz loop for a classroom. It does not recreate AMQ's account service, ranked matchmaking, chat, avatar economy, dungeon modes, or insert-song catalog. It is an independent project, not affiliated with Anime Music Quiz.
+
+### Anime title suggestions
+
+Start typing in **Your anime guess** to filter a scrollable dropdown. Use the mouse wheel or swipe on a phone; **↑ / ↓** highlights a title and **Enter** selects it. Clicking or tapping also fills the answer box. Then press **Send answer** (or Enter again) to submit. **Escape** closes the list, and free-text answers remain available when there is no match.
+
+Suggestions combine titles from the server's populated MAL list cache and MAL-linked AnimeThemes names/aliases with the prepared collection's titles, so local catalogs work too. Cached titles from earlier sessions remain searchable. Matching ignores case, accents, and punctuation; words can match different parts of a title. Exact and prefix matches appear first, with up to 100 results visible at a time; keep typing to narrow a large result set.
+
+Filtering happens on the player's device. Typing makes no external API requests. The authenticated title endpoint returns only names, without usernames, list statuses, media URLs, or current-round answers. It reuses a shared snapshot capped at 50,000 cached names; players refresh it during preparation, when a round opens, and about once a minute. Existing populated caches work without a migration or reimport.
+
+![Player title autocomplete on a phone](docs/player-autocomplete-mobile.png)
 
 ## Song sources
 
@@ -182,6 +192,8 @@ Set `PYTHON` if the Python executable is not `.venv/bin/python` (or `.venv\Scrip
 The browser regression suite also tests interrupted playback notifications, native full-video endings, pause/resume and reload during reveals, corrupt volume preferences, stale host controls, and settings validation on a phone-sized host screen. The HTTP stress script starts an isolated server with temporary synthetic media and 100 clients using distinct loopback addresses; it checks the roster limit, privacy, exact scores, CSV, and session/answer recovery after restarting the process. Both scripts remove their temporary data.
 
 Additional tests exercise malformed JSON and Unicode, large byte ranges and HEAD requests, corrupt provider metadata, cancellation during streamed responses, and 64 seeded matches with 640 rounds checked against an independent score ledger. The browser network suite covers offline drafts, responses lost after a successful server mutation, delayed guesses, cross-tab account changes, and an unanswered state request. These tests use temporary data and simulated network failures.
+
+The autocomplete suite seeds isolated MAL cache entries and checks live filtering, keyboard/mouse navigation, touch scrolling and selection, reduced mobile viewports, Unicode/IME input, literal HTML titles, free-text submission, alias scoring, pause/reveal cleanup, offline recovery, failed catalog requests, and late responses after logout. Its screenshots are written to `test-results/player-autocomplete-*.png`. Run it alone with `node scripts/browser_autocomplete.mjs`; it is also included in `npm run test:browser`.
 
 The included GitHub Actions workflow runs server checks on Python 3.12/3.13, all browser suites on Chromium, the HTTP stress script, and Python/npm dependency audits. The upstream deployment workflows are restricted to the upstream repository so this fork does not attempt to publish to the original author's servers.
 

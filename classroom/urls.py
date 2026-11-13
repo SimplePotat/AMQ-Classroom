@@ -5,6 +5,7 @@ urlpatterns = [
     path("", views.index), path("host", views.index),
     path("assets/<str:filename>", views.asset),
     path("api/state", views.state), path("api/auth", views.auth),
+    path("api/anime-titles", views.anime_titles),
     path("api/player", views.player), path("api/host", views.host),
     path("api/logout", views.logout), path("api/qr", views.qr),
     path("api/media/<str:round_id>", views.media), path("api/results.csv", views.results),
